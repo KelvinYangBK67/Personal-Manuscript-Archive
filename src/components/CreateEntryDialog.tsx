@@ -1,7 +1,14 @@
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { CreateEntryInput } from "../types";
-import { splitCommaValues } from "../lib/utils";
+import {
+  buildYearOptions,
+  getValidDayOptions,
+  splitCommaValues,
+  UNCERTAIN_DATE_VALUE,
+  YEAR_RANGE_END,
+  YEAR_RANGE_START,
+} from "../lib/utils";
 import { useI18n } from "../i18n/I18nProvider";
 
 interface CreateEntryDialogProps {
@@ -11,30 +18,72 @@ interface CreateEntryDialogProps {
   onSubmit: (input: CreateEntryInput) => Promise<void>;
 }
 
-const emptyInput: CreateEntryInput = {
+interface FormState {
+  title: string;
+  entry_type: string;
+  date_year: string;
+  date_month: string;
+  date_day: string;
+  date_note: string;
+  description: string;
+  notes: string;
+  canonical_pdf_source: string;
+}
+
+const emptyForm: FormState = {
   title: "",
   entry_type: "",
-  date_from: "",
-  date_to: "",
-  date_precision: "unknown",
+  date_year: UNCERTAIN_DATE_VALUE,
+  date_month: UNCERTAIN_DATE_VALUE,
+  date_day: UNCERTAIN_DATE_VALUE,
+  date_note: "",
   description: "",
-  language_or_system: "",
-  tags: [],
-  source_form: "pdf",
-  status: "unprocessed",
   notes: "",
   canonical_pdf_source: "",
 };
 
+function toOptionalNumber(value: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === UNCERTAIN_DATE_VALUE) {
+    return null;
+  }
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 export function CreateEntryDialog(props: CreateEntryDialogProps) {
   const { openState, creating, onClose, onSubmit } = props;
   const { t } = useI18n();
-  const [form, setForm] = useState<CreateEntryInput>(emptyInput);
+  const [form, setForm] = useState<FormState>(emptyForm);
   const [tagsText, setTagsText] = useState("");
+  const yearOptions = useMemo(() => buildYearOptions(), []);
+  const selectedYear = useMemo(() => {
+    const parsed = Number(form.date_year);
+    return Number.isFinite(parsed) && parsed >= YEAR_RANGE_START && parsed <= YEAR_RANGE_END ? parsed : null;
+  }, [form.date_year]);
+  const selectedMonth = useMemo(() => {
+    const parsed = Number(form.date_month);
+    return Number.isFinite(parsed) && parsed >= 1 && parsed <= 12 ? parsed : null;
+  }, [form.date_month]);
+  const dayOptions = useMemo(() => getValidDayOptions(selectedYear, selectedMonth), [selectedMonth, selectedYear]);
 
-  const canSubmit = useMemo(() => {
-    return form.title.trim().length > 0 && form.canonical_pdf_source.trim().length > 0;
-  }, [form]);
+  const canSubmit = useMemo(
+    () => form.title.trim().length > 0 && form.canonical_pdf_source.trim().length > 0,
+    [form.canonical_pdf_source, form.title],
+  );
+
+  useEffect(() => {
+    if (selectedMonth == null) {
+      if (form.date_day !== UNCERTAIN_DATE_VALUE) {
+        setForm((current) => ({ ...current, date_day: UNCERTAIN_DATE_VALUE }));
+      }
+      return;
+    }
+
+    if (form.date_day !== UNCERTAIN_DATE_VALUE && !dayOptions.includes(form.date_day)) {
+      setForm((current) => ({ ...current, date_day: UNCERTAIN_DATE_VALUE }));
+    }
+  }, [dayOptions, form.date_day, selectedMonth]);
 
   if (!openState) {
     return null;
@@ -55,11 +104,25 @@ export function CreateEntryDialog(props: CreateEntryDialogProps) {
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
-    await onSubmit({
-      ...form,
+
+    const payload: CreateEntryInput = {
+      title: form.title,
+      entry_type: form.entry_type,
+      date_year: toOptionalNumber(form.date_year),
+      date_month: toOptionalNumber(form.date_month),
+      date_day: toOptionalNumber(form.date_day),
+      date_year_uncertain: form.date_year === UNCERTAIN_DATE_VALUE ? 1 : 0,
+      date_month_uncertain: form.date_month === UNCERTAIN_DATE_VALUE ? 1 : 0,
+      date_day_uncertain: form.date_day === UNCERTAIN_DATE_VALUE ? 1 : 0,
+      date_note: form.date_note,
+      description: form.description,
       tags: splitCommaValues(tagsText),
-    });
-    setForm(emptyInput);
+      notes: form.notes,
+      canonical_pdf_source: form.canonical_pdf_source,
+    };
+
+    await onSubmit(payload);
+    setForm(emptyForm);
     setTagsText("");
   }
 
@@ -75,6 +138,7 @@ export function CreateEntryDialog(props: CreateEntryDialogProps) {
             {t("common.close")}
           </button>
         </div>
+
         <form className="form-grid" onSubmit={handleSubmit}>
           <label>
             <span>{t("field.title")}</span>
@@ -88,43 +152,77 @@ export function CreateEntryDialog(props: CreateEntryDialogProps) {
             <span>{t("field.entryType")}</span>
             <input
               value={form.entry_type}
-              onChange={(event) =>
-                setForm((current) => ({ ...current, entry_type: event.target.value }))
-              }
+              onChange={(event) => setForm((current) => ({ ...current, entry_type: event.target.value }))}
               placeholder={t("placeholder.entryType")}
             />
           </label>
-          <label>
-            <span>{t("field.dateFrom")}</span>
+
+          <div className="form-grid-span-2">
+            <div className="section-heading">
+              <h3>{t("field.date")}</h3>
+            </div>
+            <div className="structured-date-grid">
+              <label>
+                <span>{t("field.dateYear")}</span>
+                <input
+                  list="create-entry-year-options"
+                  value={form.date_year === UNCERTAIN_DATE_VALUE ? "" : form.date_year}
+                  onChange={(event) => {
+                    const value = event.target.value.trim();
+                    setForm((current) => ({
+                      ...current,
+                      date_year: value === "" ? UNCERTAIN_DATE_VALUE : value,
+                    }));
+                  }}
+                  placeholder={t("common.unknown")}
+                />
+                <datalist id="create-entry-year-options">
+                  {yearOptions.map((year) => (
+                    <option key={year} value={year} />
+                  ))}
+                </datalist>
+              </label>
+              <label>
+                <span>{t("field.dateMonth")}</span>
+                <select
+                  value={form.date_month}
+                  onChange={(event) => setForm((current) => ({ ...current, date_month: event.target.value }))}
+                >
+                  <option value={UNCERTAIN_DATE_VALUE}>{t("common.unknown")}</option>
+                  {Array.from({ length: 12 }, (_, index) => String(index + 1)).map((month) => (
+                    <option key={month} value={month}>
+                      {month}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>{t("field.dateDay")}</span>
+                <select
+                  value={form.date_day}
+                  onChange={(event) => setForm((current) => ({ ...current, date_day: event.target.value }))}
+                  disabled={selectedMonth == null}
+                >
+                  <option value={UNCERTAIN_DATE_VALUE}>{t("common.unknown")}</option>
+                  {dayOptions.map((day) => (
+                    <option key={day} value={day}>
+                      {day}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          </div>
+
+          <label className="form-grid-span-2">
+            <span>{t("field.dateNote")}</span>
             <input
-              value={form.date_from}
-              onChange={(event) => setForm((current) => ({ ...current, date_from: event.target.value }))}
-              placeholder={t("placeholder.dateFrom")}
-            />
-          </label>
-          <label>
-            <span>{t("field.dateTo")}</span>
-            <input
-              value={form.date_to}
-              onChange={(event) => setForm((current) => ({ ...current, date_to: event.target.value }))}
+              value={form.date_note}
+              onChange={(event) => setForm((current) => ({ ...current, date_note: event.target.value }))}
               placeholder={t("placeholder.optional")}
             />
           </label>
-          <label>
-            <span>{t("field.datePrecision")}</span>
-            <select
-              value={form.date_precision}
-              onChange={(event) =>
-                setForm((current) => ({ ...current, date_precision: event.target.value }))
-              }
-            >
-              <option value="day">{t("option.day")}</option>
-              <option value="month">{t("option.month")}</option>
-              <option value="year">{t("option.year")}</option>
-              <option value="approximate">{t("option.approximate")}</option>
-              <option value="unknown">{t("option.unknown")}</option>
-            </select>
-          </label>
+
           <label>
             <span>{t("field.tags")}</span>
             <input
@@ -133,32 +231,16 @@ export function CreateEntryDialog(props: CreateEntryDialogProps) {
               placeholder={t("placeholder.tags")}
             />
           </label>
-          <label>
-            <span>{t("field.sourceForm")}</span>
-            <input
-              value={form.source_form}
-              onChange={(event) =>
-                setForm((current) => ({ ...current, source_form: event.target.value }))
-              }
-            />
-          </label>
-          <label>
-            <span>{t("field.status")}</span>
-            <input
-              value={form.status}
-              onChange={(event) => setForm((current) => ({ ...current, status: event.target.value }))}
-            />
-          </label>
+
           <label className="form-grid-span-2">
             <span>{t("field.description")}</span>
             <textarea
               rows={3}
               value={form.description}
-              onChange={(event) =>
-                setForm((current) => ({ ...current, description: event.target.value }))
-              }
+              onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
             />
           </label>
+
           <label className="form-grid-span-2">
             <span>{t("field.notes")}</span>
             <textarea
@@ -167,6 +249,7 @@ export function CreateEntryDialog(props: CreateEntryDialogProps) {
               onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}
             />
           </label>
+
           <label className="form-grid-span-2">
             <span>{t("field.canonicalPdf")}</span>
             <div className="file-picker">
@@ -176,6 +259,7 @@ export function CreateEntryDialog(props: CreateEntryDialogProps) {
               </button>
             </div>
           </label>
+
           <div className="modal-actions form-grid-span-2">
             <button type="button" className="ghost-button" onClick={onClose} disabled={creating}>
               {t("common.cancel")}

@@ -15,6 +15,7 @@ import {
   deleteAsset,
   deleteEntry,
   importAsset,
+  importEntryPdf,
   initArchiveRoot,
   loadBinaryAsset,
   loadArchive,
@@ -25,9 +26,10 @@ import {
 import { ArchiveSelector } from "./components/ArchiveSelector";
 import { CreateEntryDialog } from "./components/CreateEntryDialog";
 import { EditorPane } from "./components/EditorPane";
-import { NavigationPane } from "./components/NavigationPane";
+import { NavigationPane, buildTreeNodeIds } from "./components/NavigationPane";
 import { PdfViewerPane } from "./components/PdfViewerPane";
 import { ResourceImportDialog, type ResourceImportDialogResult } from "./components/ResourceImportDialog";
+import { comparePagesBySortOrder } from "./lib/utils";
 import { useI18n } from "./i18n/I18nProvider";
 import "./styles.css";
 
@@ -45,6 +47,16 @@ function supportsAutomaticExtraction(sourcePath: string): boolean {
   return extension === "txt" || extension === "md" || extension === "docx";
 }
 
+function getDefaultExpandedNodeIds(entryBundle: EntryWithPages | null): string[] {
+  if (!entryBundle) {
+    return [];
+  }
+  const ids = buildTreeNodeIds(entryBundle.entry);
+  return [ids.typeId, ids.entryId, "yearId" in ids ? ids.yearId : ids.unknownId, "monthId" in ids ? ids.monthId ?? null : null].filter(
+    (value): value is string => Boolean(value),
+  );
+}
+
 export default function App() {
   const { locale, setLocale, t } = useI18n();
   const [archiveRoot, setArchiveRoot] = useState<string | null>(
@@ -53,7 +65,7 @@ export default function App() {
   const [snapshot, setSnapshot] = useState<ArchiveSnapshot | null>(null);
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null);
   const [selectedPageId, setSelectedPageId] = useState<string | null>(null);
-  const [expandedEntryIds, setExpandedEntryIds] = useState<string[]>([]);
+  const [expandedNodeIds, setExpandedNodeIds] = useState<string[]>([]);
   const [searchMode, setSearchMode] = useState<SearchMode>("metadata");
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
@@ -87,7 +99,7 @@ export default function App() {
         .then((results) => setSearchResults(results))
         .catch((error) => setErrorMessage(String(error)))
         .finally(() => setSearching(false));
-    }, 250);
+    }, 220);
 
     return () => window.clearTimeout(timer);
   }, [archiveRoot, searchMode, searchQuery]);
@@ -98,13 +110,13 @@ export default function App() {
 
     try {
       const nextSnapshot = await initArchiveRoot(rootPath);
+      const firstEntry = nextSnapshot.entries[0] ?? null;
       setSnapshot(nextSnapshot);
       setArchiveRoot(nextSnapshot.archive_root);
       window.localStorage.setItem(archiveRootStorageKey, nextSnapshot.archive_root);
-      const firstEntry = nextSnapshot.entries[0] ?? null;
       setSelectedEntryId(firstEntry?.entry.id ?? null);
-      setSelectedPageId(firstEntry?.pages[0]?.id ?? null);
-      setExpandedEntryIds(firstEntry ? [firstEntry.entry.id] : []);
+      setSelectedPageId((firstEntry ? [...firstEntry.pages].sort(comparePagesBySortOrder)[0] : null)?.id ?? null);
+      setExpandedNodeIds(getDefaultExpandedNodeIds(firstEntry));
     } catch (error) {
       setErrorMessage(String(error));
     } finally {
@@ -116,11 +128,9 @@ export default function App() {
     if (!archiveRoot) {
       return;
     }
-
     setLoading(true);
     try {
-      const nextSnapshot = await loadArchive(archiveRoot);
-      setSnapshot(nextSnapshot);
+      setSnapshot(await loadArchive(archiveRoot));
     } catch (error) {
       setErrorMessage(String(error));
     } finally {
@@ -132,17 +142,15 @@ export default function App() {
     if (!archiveRoot) {
       return;
     }
-
     setCreating(true);
     setErrorMessage(null);
     try {
       const result = await createEntry(archiveRoot, input);
+      const selectedBundle = result.snapshot.entries.find((item) => item.entry.id === result.selected_entry_id) ?? null;
       setSnapshot(result.snapshot);
       setSelectedEntryId(result.selected_entry_id);
       setSelectedPageId(result.selected_page_id);
-      setExpandedEntryIds((current) =>
-        current.includes(result.selected_entry_id) ? current : [...current, result.selected_entry_id],
-      );
+      setExpandedNodeIds((current) => [...new Set([...current, ...getDefaultExpandedNodeIds(selectedBundle)])]);
       setActiveTab("metadata");
       setCreateDialogOpen(false);
     } catch (error) {
@@ -166,23 +174,33 @@ export default function App() {
     return selectedEntryBundle.pages.find((item) => item.id === selectedPageId) ?? null;
   }, [selectedEntryBundle, selectedPageId]);
 
-  const currentPdfPageIndex = selectedPage?.pdf_page_index ?? 0;
-  const canonicalPdfPath = selectedEntryBundle?.entry.canonical_pdf_path ?? null;
+  const currentPdfPath = selectedPage?.source_pdf_path ?? null;
+  const currentPdfPages = useMemo(
+    () =>
+      [...(selectedEntryBundle?.pages ?? [])]
+        .filter((page) => page.source_pdf_path === currentPdfPath)
+        .sort((a, b) => a.source_pdf_page_index - b.source_pdf_page_index),
+    [currentPdfPath, selectedEntryBundle],
+  );
+  const currentPdfPageIndex = selectedPage?.source_pdf_page_index ?? 0;
+  const currentPdfPageCount = useMemo(() => {
+    if (currentPdfPages.length === 0) {
+      return 0;
+    }
+    return Math.max(...currentPdfPages.map((page) => page.source_pdf_page_index)) + 1;
+  }, [currentPdfPages]);
 
   useEffect(() => {
-    pageIndexLookupRef.current = new Map(
-      (selectedEntryBundle?.pages ?? []).map((page) => [page.pdf_page_index, page.id]),
-    );
-  }, [selectedEntryBundle]);
+    pageIndexLookupRef.current = new Map(currentPdfPages.map((page) => [page.source_pdf_page_index, page.id]));
+  }, [currentPdfPages]);
 
   useEffect(() => {
-    if (!archiveRoot || !canonicalPdfPath) {
+    if (!archiveRoot || !currentPdfPath) {
       setPdfData(null);
       return;
     }
-
     let cancelled = false;
-    void loadBinaryAsset(archiveRoot, canonicalPdfPath)
+    void loadBinaryAsset(archiveRoot, currentPdfPath)
       .then((data) => {
         if (!cancelled) {
           setPdfData(data);
@@ -194,11 +212,10 @@ export default function App() {
           setErrorMessage(String(error));
         }
       });
-
     return () => {
       cancelled = true;
     };
-  }, [archiveRoot, canonicalPdfPath]);
+  }, [archiveRoot, currentPdfPath]);
 
   const handlePdfPageIndexChange = useCallback((pageIndex: number) => {
     const nextPageId = pageIndexLookupRef.current.get(pageIndex) ?? null;
@@ -208,58 +225,49 @@ export default function App() {
   }, []);
 
   function applyUpdatedEntry(updated: EntryRecord) {
-    setSnapshot((current) => {
-      if (!current) {
-        return current;
-      }
-      return {
-        ...current,
-        entries: current.entries.map((item) =>
-          item.entry.id === updated.id ? { ...item, entry: updated } : item,
-        ),
-      };
-    });
+    setSnapshot((current) =>
+      current
+        ? { ...current, entries: current.entries.map((item) => (item.entry.id === updated.id ? { ...item, entry: updated } : item)) }
+        : current,
+    );
   }
 
   function applyUpdatedPage(updated: PageRecord) {
-    setSnapshot((current) => {
-      if (!current) {
-        return current;
-      }
-      return {
-        ...current,
-        entries: current.entries.map((item) =>
-          item.entry.id === updated.entry_id
-            ? {
-                ...item,
-                entry: { ...item.entry, updated_at: updated.updated_at },
-                pages: item.pages.map((page) => (page.id === updated.id ? updated : page)),
-              }
-            : item,
-        ),
-      };
-    });
+    setSnapshot((current) =>
+      current
+        ? {
+            ...current,
+            entries: current.entries.map((item) =>
+              item.entry.id === updated.entry_id
+                ? {
+                    ...item,
+                    entry: { ...item.entry, updated_at: updated.updated_at },
+                    pages: item.pages.map((page) => (page.id === updated.id ? updated : page)).sort(comparePagesBySortOrder),
+                  }
+                : item,
+            ),
+          }
+        : current,
+    );
   }
 
-  async function handleSaveEntry(entry: EntryRecord) {
+  async function handleSaveEntry(entryRecord: EntryRecord) {
     if (!archiveRoot) {
       return;
     }
     try {
-      const saved = await updateEntry(archiveRoot, entry);
-      applyUpdatedEntry(saved);
+      applyUpdatedEntry(await updateEntry(archiveRoot, entryRecord));
     } catch (error) {
       setErrorMessage(String(error));
     }
   }
 
-  async function handleSavePage(page: PageRecord) {
+  async function handleSavePage(pageRecord: PageRecord) {
     if (!archiveRoot) {
       return;
     }
     try {
-      const saved = await updatePage(archiveRoot, page);
-      applyUpdatedPage(saved);
+      applyUpdatedPage(await updatePage(archiveRoot, pageRecord));
     } catch (error) {
       setErrorMessage(String(error));
     }
@@ -269,18 +277,16 @@ export default function App() {
     if (!archiveRoot || !selectedEntryId) {
       return;
     }
-
     if (!window.confirm(t("confirm.deleteEntry"))) {
       return;
     }
-
     try {
       const nextSnapshot = await deleteEntry(archiveRoot, selectedEntryId);
-      setSnapshot(nextSnapshot);
       const firstEntry = nextSnapshot.entries[0] ?? null;
+      setSnapshot(nextSnapshot);
       setSelectedEntryId(firstEntry?.entry.id ?? null);
-      setSelectedPageId(firstEntry?.pages[0]?.id ?? null);
-      setExpandedEntryIds(firstEntry ? [firstEntry.entry.id] : []);
+      setSelectedPageId((firstEntry ? [...firstEntry.pages].sort(comparePagesBySortOrder)[0] : null)?.id ?? null);
+      setExpandedNodeIds(getDefaultExpandedNodeIds(firstEntry));
     } catch (error) {
       setErrorMessage(String(error));
     }
@@ -305,11 +311,11 @@ export default function App() {
 
     let extractionMode: ImportAssetInput["extraction_mode"] = "none";
     if (result.importMode === "resource_and_extract") {
-      if (pendingResourceImport.hasExistingTranscription) {
-        extractionMode = result.existingTranscriptionMode === "cancel" ? "none" : result.existingTranscriptionMode;
-      } else {
-        extractionMode = "replace";
-      }
+      extractionMode = pendingResourceImport.hasExistingTranscription
+        ? result.existingTranscriptionMode === "cancel"
+          ? "none"
+          : result.existingTranscriptionMode
+        : "replace";
     }
 
     setImportingResource(true);
@@ -322,10 +328,8 @@ export default function App() {
         target_page_id: extractionMode === "none" ? null : selectedPage?.id ?? null,
         extraction_mode: extractionMode,
       });
-
       setSnapshot(response.snapshot);
       setPendingResourceImport(null);
-
       if (response.extraction_status === "success") {
         setStatusMessage(t("notice.extractionSuccess"));
       } else if (response.extraction_status === "failed") {
@@ -340,18 +344,44 @@ export default function App() {
     }
   }
 
+  async function handleImportPdfPages(sourcePath: string) {
+    if (!archiveRoot || !selectedEntryBundle) {
+      return;
+    }
+    setImportingResource(true);
+    setErrorMessage(null);
+    try {
+      const result = await importEntryPdf(archiveRoot, {
+        entry_id: selectedEntryBundle.entry.id,
+        source_path: sourcePath,
+      });
+      setSnapshot(result.snapshot);
+      setSelectedPageId(result.selected_page_id);
+      setExpandedNodeIds((current) => [...new Set([...current, ...getDefaultExpandedNodeIds(selectedEntryBundle)])]);
+    } catch (error) {
+      setErrorMessage(String(error));
+    } finally {
+      setImportingResource(false);
+    }
+  }
+
   async function handleDeleteResource(assetId: string) {
     if (!archiveRoot) {
       return;
     }
-
     try {
-      const nextSnapshot = await deleteAsset(archiveRoot, assetId);
-      setSnapshot(nextSnapshot);
+      setSnapshot(await deleteAsset(archiveRoot, assetId));
       setStatusMessage(null);
     } catch (error) {
       setErrorMessage(String(error));
     }
+  }
+
+  function ensureExpandedForEntry(entryBundle: EntryWithPages | null) {
+    if (!entryBundle) {
+      return;
+    }
+    setExpandedNodeIds((current) => [...new Set([...current, ...getDefaultExpandedNodeIds(entryBundle)])]);
   }
 
   if (!archiveRoot || !snapshot) {
@@ -392,31 +422,28 @@ export default function App() {
           entries={snapshot.entries}
           selectedEntryId={selectedEntryId}
           selectedPageId={selectedPageId}
-          expandedEntryIds={expandedEntryIds}
+          expandedNodeIds={expandedNodeIds}
           searchQuery={searchQuery}
           searchMode={searchMode}
           searchResults={searchResults}
           onSearchQueryChange={setSearchQuery}
           onSearchModeChange={setSearchMode}
           onSelectEntry={(entryId) => {
+            const entryBundle = snapshot.entries.find((item) => item.entry.id === entryId) ?? null;
             setSelectedEntryId(entryId);
-            const entry = snapshot.entries.find((item) => item.entry.id === entryId);
-            setSelectedPageId(entry?.pages[0]?.id ?? null);
-            setExpandedEntryIds((current) => (current.includes(entryId) ? current : [...current, entryId]));
+            setSelectedPageId((entryBundle ? [...entryBundle.pages].sort(comparePagesBySortOrder)[0] : null)?.id ?? null);
+            ensureExpandedForEntry(entryBundle);
             setActiveTab("metadata");
           }}
           onSelectPage={(page) => {
+            const entryBundle = snapshot.entries.find((item) => item.entry.id === page.entry_id) ?? null;
             setSelectedEntryId(page.entry_id);
             setSelectedPageId(page.id);
-            setExpandedEntryIds((current) =>
-              current.includes(page.entry_id) ? current : [...current, page.entry_id],
-            );
+            ensureExpandedForEntry(entryBundle);
           }}
-          onToggleEntry={(entryId) =>
-            setExpandedEntryIds((current) =>
-              current.includes(entryId)
-                ? current.filter((item) => item !== entryId)
-                : [...current, entryId],
+          onToggleNode={(nodeId) =>
+            setExpandedNodeIds((current) =>
+              current.includes(nodeId) ? current.filter((item) => item !== nodeId) : [...current, nodeId],
             )
           }
           onOpenCreateDialog={() => setCreateDialogOpen(true)}
@@ -424,12 +451,14 @@ export default function App() {
           onRefresh={refreshArchive}
           searching={searching}
         />
+
         <PdfViewerPane
           pdfData={pdfData}
           currentPageIndex={currentPdfPageIndex}
-          pageCount={selectedEntryBundle?.entry.page_count ?? 0}
+          pageCount={currentPdfPageCount}
           onPageIndexChange={handlePdfPageIndexChange}
         />
+
         <EditorPane
           entry={selectedEntryBundle?.entry ?? null}
           page={selectedPage}
@@ -439,6 +468,7 @@ export default function App() {
           onSaveEntry={handleSaveEntry}
           onSavePage={handleSavePage}
           onImportResource={handleImportResource}
+          onImportPdfPages={handleImportPdfPages}
           onDeleteResource={(asset) => handleDeleteResource(asset.id)}
           importingResource={importingResource}
         />
@@ -450,6 +480,7 @@ export default function App() {
         onClose={() => setCreateDialogOpen(false)}
         onSubmit={handleCreateEntry}
       />
+
       <ResourceImportDialog
         openState={Boolean(pendingResourceImport)}
         fileName={pendingResourceImport?.fileName ?? ""}

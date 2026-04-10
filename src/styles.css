@@ -88,7 +88,7 @@ button {
 .workspace-grid {
   flex: 1;
   display: grid;
-  grid-template-columns: minmax(250px, 0.76fr) minmax(580px, 1.85fr) minmax(330px, 1.02fr);
+  grid-template-columns: minmax(240px, 0.72fr) minmax(620px, 1.95fr) minmax(340px, 1.08fr);
   gap: 14px;
   min-height: 0;
   overflow: hidden;
@@ -110,7 +110,7 @@ button {
   justify-content: space-between;
   align-items: center;
   gap: 12px;
-  padding: 14px 16px;
+  padding: 12px 14px;
   background: rgba(244, 239, 230, 0.95);
   border-bottom: 1px solid rgba(99, 81, 53, 0.12);
 }
@@ -160,8 +160,13 @@ button {
 .tab-button {
   border: none;
   border-radius: 999px;
-  padding: 10px 14px;
+  padding: 8px 12px;
   transition: transform 120ms ease, opacity 120ms ease, background 120ms ease;
+}
+
+.compact-button {
+  padding: 6px 10px;
+  font-size: 13px;
 }
 
 .primary-button {
@@ -245,16 +250,12 @@ textarea {
   resize: vertical;
 }
 
-.tree-list,
-.tree-pages,
 .search-results {
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
-.tree-entry-button,
-.tree-page-button,
 .search-result-card {
   width: 100%;
   text-align: left;
@@ -264,39 +265,11 @@ textarea {
   padding: 12px;
 }
 
-.tree-entry-button {
-  display: grid;
-  grid-template-columns: 16px 1fr auto;
-  gap: 10px;
-  align-items: center;
-}
-
-.tree-entry-body {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.tree-page-button {
-  padding-left: 18px;
-}
-
-.tree-pages {
-  margin-left: 24px;
-}
-
 .is-active {
   border-color: #5a7b54;
   background: rgba(224, 235, 219, 0.95);
 }
-
-.tree-toggle {
-  color: #65553c;
-  font-size: 13px;
-}
-
-.search-result-card strong,
-.tree-entry-body strong {
+.search-result-card strong {
   display: block;
   margin-bottom: 4px;
 }
@@ -320,6 +293,99 @@ textarea {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 8px;
+}
+
+.nav-toolbar {
+  gap: 10px;
+}
+
+.compact-actions {
+  justify-content: flex-start;
+}
+
+.outline-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+}
+
+.tree-node {
+  display: flex;
+  flex-direction: column;
+}
+
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+}
+
+.tree-children {
+  margin-left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tree-toggle-button,
+.tree-toggle-placeholder {
+  width: 18px;
+  min-width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #6a5d4a;
+}
+
+.tree-toggle-button {
+  border: none;
+  background: transparent;
+  padding: 0;
+  border-radius: 6px;
+}
+
+.tree-label-button {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  text-align: left;
+  padding: 3px 6px;
+  border-radius: 8px;
+  color: #2a241d;
+}
+
+.tree-label-button.is-static {
+  cursor: default;
+}
+
+.tree-type-label {
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.tree-year-label {
+  font-weight: 600;
+  color: #4a4030;
+}
+
+.tree-month-label {
+  color: #5d503d;
+}
+
+.tree-entry-label {
+  font-weight: 500;
+}
+
+.tree-page-label {
+  color: #756854;
+}
+
+.tree-label-button.is-active {
+  background: rgba(224, 235, 219, 0.95);
 }
 
 .form-grid {
@@ -395,6 +461,10 @@ label {
   background: rgba(255, 253, 248, 0.92);
   border-radius: 16px;
   padding: 14px;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
 }
 
 .resource-type-chip {
@@ -474,6 +544,27 @@ label {
   width: 88px;
 }
 
+.viewer-toolbar {
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.viewer-toolbar-group {
+  gap: 6px;
+}
+
+.structured-date-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.structured-date-part {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
 .info-chip,
 .error-chip,
 .error-text {
@@ -501,5 +592,10 @@ label {
   .topbar-meta {
     max-width: none;
     align-items: flex-start;
+  }
+
+  .structured-date-grid,
+  .structured-date-part {
+    grid-template-columns: 1fr;
   }
 }

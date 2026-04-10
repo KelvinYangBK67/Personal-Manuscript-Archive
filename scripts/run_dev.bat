@@ -3,9 +3,15 @@ setlocal
 
 pushd "%~dp0\.."
 
-set "PATH=C:\Program Files\nodejs;%USERPROFILE%\.cargo\bin;%PATH%"
+set "PATH=C:\Program Files\nodejs;%CD%\.rustup\toolchains\stable-x86_64-pc-windows-msvc\bin;%USERPROFILE%\.cargo\bin;%PATH%"
 set "RUSTUP_HOME=%CD%\.rustup"
 set "CARGO_HOME=%CD%\.cargo"
+set "RUSTUP_TOOLCHAIN=stable-x86_64-pc-windows-msvc"
+set "TEMP=%CD%\src-tauri\target\tmp"
+set "TMP=%CD%\src-tauri\target\tmp"
+
+if not exist "%TEMP%" mkdir "%TEMP%"
+powershell -NoProfile -Command "if (Test-Path 'src-tauri\target') { Get-ChildItem 'src-tauri\target' -Directory -Recurse -Force | ForEach-Object { $_.Attributes = ($_.Attributes -band (-bnot [System.IO.FileAttributes]::ReadOnly)) }; (Get-Item 'src-tauri\target').Attributes = ([System.IO.FileAttributes]::Directory -bor [System.IO.FileAttributes]::NotContentIndexed) }"
 
 where node >nul 2>nul
 if errorlevel 1 (

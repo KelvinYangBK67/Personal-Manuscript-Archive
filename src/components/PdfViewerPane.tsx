@@ -7,9 +7,8 @@ GlobalWorkerOptions.workerSrc = workerUrl;
 
 type ZoomMode = "fit-width" | "fit-page" | "manual";
 
-const zoomOptions = [50, 75, 100, 125, 150, 200];
-const minimumManualZoom = 25;
-const maximumManualZoom = 300;
+const minimumManualZoom = 10;
+const maximumManualZoom = 1000;
 
 interface PdfViewerPaneProps {
   pdfData: Uint8Array | null;
@@ -220,16 +219,6 @@ export const PdfViewerPane = memo(function PdfViewerPane(props: PdfViewerPanePro
     setManualZoomPercent(clampZoom(percent));
   }
 
-  function handleZoomChange(value: string) {
-    if (value === "fit-width" || value === "fit-page") {
-      pendingScrollAnchorRef.current = null;
-      setZoomMode(value);
-      return;
-    }
-
-    setManualZoom(Number(value));
-  }
-
   function handleViewerWheel(event: WheelEvent<HTMLDivElement>) {
     if (!event.ctrlKey) {
       return;
@@ -258,16 +247,16 @@ export const PdfViewerPane = memo(function PdfViewerPane(props: PdfViewerPanePro
   return (
     <section className="pane pane-viewer">
       <div className="pane-toolbar viewer-toolbar">
-        <div className="action-row">
+        <div className="action-row viewer-toolbar-group">
           <button
-            className="secondary-button"
+            className="secondary-button compact-button"
             onClick={() => onPageIndexChange(Math.max(currentPageIndex - 1, 0))}
             disabled={!documentRef || currentPageIndex <= 0}
           >
             {t("viewer.previous")}
           </button>
           <button
-            className="secondary-button"
+            className="secondary-button compact-button"
             onClick={() => onPageIndexChange(Math.min(currentPageIndex + 1, Math.max(pageCount - 1, 0)))}
             disabled={!documentRef || currentPageIndex >= Math.max(pageCount - 1, 0)}
           >
@@ -291,32 +280,35 @@ export const PdfViewerPane = memo(function PdfViewerPane(props: PdfViewerPanePro
             />
           </label>
         </div>
-        <div className="action-row">
+        <div className="action-row viewer-toolbar-group">
           <button
-            className={`secondary-button ${zoomMode === "fit-width" ? "is-active" : ""}`}
-            onClick={() => handleZoomChange("fit-width")}
+            className={`secondary-button compact-button ${zoomMode === "fit-width" ? "is-active" : ""}`}
+            onClick={() => {
+              pendingScrollAnchorRef.current = null;
+              setZoomMode("fit-width");
+            }}
           >
             {t("viewer.fitWidth")}
           </button>
           <button
-            className={`secondary-button ${zoomMode === "fit-page" ? "is-active" : ""}`}
-            onClick={() => handleZoomChange("fit-page")}
+            className={`secondary-button compact-button ${zoomMode === "fit-page" ? "is-active" : ""}`}
+            onClick={() => {
+              pendingScrollAnchorRef.current = null;
+              setZoomMode("fit-page");
+            }}
           >
             {t("viewer.fitPage")}
           </button>
-          <select
-            className="zoom-select"
-            value={zoomMode === "manual" ? String(manualZoomPercent) : zoomMode}
-            onChange={(event) => handleZoomChange(event.target.value)}
-          >
-            <option value="fit-width">{t("viewer.fitWidth")}</option>
-            <option value="fit-page">{t("viewer.fitPage")}</option>
-            {zoomOptions.map((percent) => (
-              <option key={percent} value={percent}>
-                {percent}%
-              </option>
-            ))}
-          </select>
+          <label className="inline-control">
+            <span>{t("viewer.zoomLabel")}</span>
+            <input
+              type="number"
+              min={minimumManualZoom}
+              max={maximumManualZoom}
+              value={Math.round(zoomMode === "manual" ? manualZoomPercent : effectiveScale * 100)}
+              onChange={(event) => setManualZoom(Number(event.target.value || "100"))}
+            />
+          </label>
           <span className="viewer-meta">
             {documentRef
               ? t("viewer.pageCounter", { current: currentPageIndex + 1, total: pageCount })

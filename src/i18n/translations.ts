@@ -21,6 +21,7 @@ export type TranslationKey =
   | "common.entry"
   | "common.entries"
   | "common.untitledPage"
+  | "common.unknown"
   | "nav.searchPlaceholder"
   | "nav.metadataSearch"
   | "nav.fullTextSearch"
@@ -30,20 +31,19 @@ export type TranslationKey =
   | "nav.matches"
   | "nav.pageResult"
   | "nav.entryResult"
-  | "nav.show"
-  | "nav.hide"
+  | "nav.timeUnknown"
+  | "nav.empty"
   | "viewer.loadPdfPrompt"
   | "viewer.loadingPdf"
   | "viewer.unableToLoadPdf"
   | "viewer.previous"
   | "viewer.next"
   | "viewer.jump"
-  | "viewer.zoomOut"
-  | "viewer.zoomIn"
   | "viewer.fitWidth"
   | "viewer.fitPage"
   | "viewer.pageCounter"
   | "viewer.zoomHelp"
+  | "viewer.zoomLabel"
   | "editor.editor"
   | "editor.selectEntryOrPage"
   | "editor.inspector"
@@ -58,30 +58,31 @@ export type TranslationKey =
   | "editor.autosave"
   | "field.title"
   | "field.entryType"
-  | "field.dateFrom"
-  | "field.dateTo"
-  | "field.datePrecision"
-  | "field.languageOrSystem"
+  | "field.date"
+  | "field.dateYear"
+  | "field.dateMonth"
+  | "field.dateDay"
+  | "field.datePartMode"
+  | "field.dateNote"
   | "field.tags"
-  | "field.sourceForm"
-  | "field.status"
   | "field.description"
   | "field.notes"
   | "field.canonicalPdf"
   | "field.pageNumber"
   | "field.pageLabel"
+  | "field.pageOrder"
+  | "field.sourcePdf"
+  | "field.sourcePdfPage"
+  | "field.originalPageNumber"
   | "field.summary"
   | "field.keywords"
-  | "field.transcriptionStatus"
-  | "field.legibility"
-  | "field.containsSpecialGlyphs"
-  | "field.specialGlyphNote"
   | "field.pageNotes"
   | "field.transcriptionText"
   | "button.choosePdf"
   | "button.createEntry"
   | "button.importResource"
   | "button.deleteResource"
+  | "button.importPdfPages"
   | "button.importing"
   | "prompt.importExtract"
   | "prompt.transcriptionExists"
@@ -98,35 +99,21 @@ export type TranslationKey =
   | "resources.empty"
   | "placeholder.entryTitle"
   | "placeholder.entryType"
-  | "placeholder.dateFrom"
   | "placeholder.optional"
-  | "placeholder.languageOrSystem"
   | "placeholder.tags"
   | "placeholder.choosePdfFile"
-  | "option.day"
-  | "option.month"
-  | "option.year"
-  | "option.approximate"
-  | "option.unknown"
-  | "option.none"
-  | "option.partial"
-  | "option.complete"
-  | "option.summaryOnly"
-  | "option.clear"
-  | "option.medium"
-  | "option.difficult"
-  | "option.nearlyIllegible"
+  | "option.known"
+  | "option.uncertain"
+  | "option.notSet"
   | "confirm.deleteEntry"
   | "result.matchedField.title"
   | "result.matchedField.description"
   | "result.matchedField.entry_type"
   | "result.matchedField.tags_json"
-  | "result.matchedField.language_or_system"
   | "result.matchedField.summary"
   | "result.matchedField.keywords_json"
   | "result.matchedField.page_notes"
-  | "result.matchedField.transcription_text"
-  | "result.matchedField.special_glyph_note";
+  | "result.matchedField.transcription_text";
 
 export type TranslationValue = string | ((vars: Record<string, string | number>) => string);
 
@@ -138,12 +125,12 @@ export const translations: Record<Locale, Record<TranslationKey, TranslationValu
     "archive.localArchive": "本機史料庫",
     "archive.chooseRootTitle": "選擇史料庫根目錄",
     "archive.description":
-      "請選擇一個史料庫根目錄。資料庫、受管資產、縮圖、匯出內容與垃圾桶都會以可見的目錄結構存放在其中。",
+      "請選擇一個史料庫根目錄。資料庫、受管檔案、縮圖、匯出與垃圾桶都會以可見的資料夾結構存放在其中。",
     "archive.opening": "正在開啟史料庫...",
     "archive.changeRoot": "更換史料庫根目錄",
     "archive.chooseRoot": "選擇史料庫根目錄",
     "dialog.newEntry": "新增條目",
-    "dialog.createImportPdf": "建立條目並匯入主閱讀 PDF",
+    "dialog.createImportPdf": "建立條目並匯入 PDF 頁面來源",
     "common.close": "關閉",
     "common.cancel": "取消",
     "common.refresh": "重新整理",
@@ -153,29 +140,29 @@ export const translations: Record<Locale, Record<TranslationKey, TranslationValu
     "common.entry": "條目",
     "common.entries": "條目",
     "common.untitledPage": "未命名頁面",
+    "common.unknown": "不確定",
     "nav.searchPlaceholder": "搜尋資訊或可檢索文本...",
     "nav.metadataSearch": "資訊搜尋",
     "nav.fullTextSearch": "全文搜尋",
     "nav.newEntry": "新增條目",
     "nav.deleteEntry": "刪除條目",
     "nav.results": "結果",
-    "nav.matches": ({ count }) => `${count} 筆符合`,
+    "nav.matches": ({ count }) => `${count} 筆`,
     "nav.pageResult": "頁面結果",
     "nav.entryResult": "條目結果",
-    "nav.show": "展開",
-    "nav.hide": "收合",
-    "viewer.loadPdfPrompt": "請先選取含有主閱讀 PDF 的條目。",
+    "nav.timeUnknown": "時間不明",
+    "nav.empty": "目前尚無條目",
+    "viewer.loadPdfPrompt": "請先選取一個頁面以載入其來源 PDF。",
     "viewer.loadingPdf": "正在載入 PDF...",
     "viewer.unableToLoadPdf": ({ error }) => `無法載入 PDF：${error}`,
     "viewer.previous": "上一頁",
     "viewer.next": "下一頁",
     "viewer.jump": "跳至頁面",
-    "viewer.zoomOut": "縮小",
-    "viewer.zoomIn": "放大",
     "viewer.fitWidth": "符合欄寬",
     "viewer.fitPage": "符合整頁",
     "viewer.pageCounter": ({ current, total }) => `第 ${current} / ${total} 頁`,
     "viewer.zoomHelp": "可用 Ctrl + 滾輪縮放",
+    "viewer.zoomLabel": "縮放",
     "editor.editor": "編輯器",
     "editor.selectEntryOrPage": "請選取條目或頁面，以編輯資訊與可檢索文本。",
     "editor.inspector": "檢視器",
@@ -187,79 +174,66 @@ export const translations: Record<Locale, Record<TranslationKey, TranslationValu
     "editor.pageTranscription": "頁面可檢索文本",
     "editor.nothingSelected": "尚未選取",
     "editor.selectPageForTranscription": "請選取頁面，以編輯該頁唯一的可檢索文本。",
-    "editor.autosave": "編輯暫停片刻後會自動儲存。",
+    "editor.autosave": "變更會在短暫停頓後自動儲存。",
     "field.title": "標題",
     "field.entryType": "條目類型",
-    "field.dateFrom": "起始日期",
-    "field.dateTo": "結束日期",
-    "field.datePrecision": "日期精度",
-    "field.languageOrSystem": "語言或系統",
+    "field.date": "日期",
+    "field.dateYear": "年",
+    "field.dateMonth": "月",
+    "field.dateDay": "日",
+    "field.datePartMode": "日期狀態",
+    "field.dateNote": "日期說明",
     "field.tags": "標籤",
-    "field.sourceForm": "來源形式",
-    "field.status": "狀態",
     "field.description": "描述",
     "field.notes": "備註",
-    "field.canonicalPdf": "主閱讀 PDF",
+    "field.canonicalPdf": "來源 PDF",
     "field.pageNumber": "頁碼",
     "field.pageLabel": "頁面標籤",
+    "field.pageOrder": "排序",
+    "field.sourcePdf": "來源 PDF",
+    "field.sourcePdfPage": "來源 PDF 頁碼",
+    "field.originalPageNumber": "原始頁碼",
     "field.summary": "摘要",
     "field.keywords": "關鍵詞",
-    "field.transcriptionStatus": "轉寫狀態",
-    "field.legibility": "可辨識度",
-    "field.containsSpecialGlyphs": "含特殊字形",
-    "field.specialGlyphNote": "特殊字形備註",
     "field.pageNotes": "頁面備註",
     "field.transcriptionText": "可檢索文本",
     "button.choosePdf": "選擇 PDF",
     "button.createEntry": "建立條目",
     "button.importResource": "匯入資源",
     "button.deleteResource": "刪除資源",
-    "button.importing": "匯入中...",
-    "prompt.importExtract": "匯入時是否自動抽取爲轉寫",
-    "prompt.transcriptionExists": "已存在轉寫，請選擇處理方式",
-    "option.saveResourceOnly": "僅作爲資源保存",
-    "option.saveResourceAndExtract": "作爲資源保存，並自動抽取純文本到轉寫",
+    "button.importPdfPages": "匯入 PDF 頁面",
+    "button.importing": "處理中...",
+    "prompt.importExtract": "匯入時是否自動抽取為轉寫",
+    "prompt.transcriptionExists": "轉寫已存在，請選擇如何處理",
+    "option.saveResourceOnly": "僅作為資源保存",
+    "option.saveResourceAndExtract": "作為資源保存，並自動抽取純文本到轉寫",
     "option.replaceTranscription": "覆蓋現有轉寫",
-    "option.appendTranscription": "追加到現有轉寫後方",
+    "option.appendTranscription": "追加到現有轉寫後面",
     "option.cancelInsertion": "取消本次寫入",
     "notice.extractionSuccess": "已成功抽取純文本",
-    "notice.extractionFailed": "無法從此文件抽取純文本",
+    "notice.extractionFailed": "無法從該文件抽取純文本",
     "notice.extractionUnsupported": "此文件類型暫不支持自動抽取",
     "hint.searchableTextOnly":
-      "此區只維護這一頁唯一的可檢索文本，用於搜尋、索引與快速辨認內容，不負責重建原始格式。特殊字形可用 [G001] 或 [UNK-1] 之類的占位符表示。",
-    "hint.resourcesRole": "附屬電子資源會列在這裡，用於輔助整理與比對，但不取代中間的主閱讀 PDF。",
-    "resources.empty": "此條目尚無附屬電子資源。",
+      "這裡保存的是該頁唯一的可檢索文本，用於搜尋、索引與快速辨識內容，不用來重建原始格式。",
+    "hint.resourcesRole": "附屬電子資源列於此處，可作為整理與比對材料，但不取代中欄主閱讀 PDF。",
+    "resources.empty": "此條目尚無附屬電子資源",
     "placeholder.entryTitle": "條目標題",
-    "placeholder.entryType": "日記、手稿、摘錄……",
-    "placeholder.dateFrom": "YYYY-MM-DD 或自由文字",
-    "placeholder.optional": "可選填",
-    "placeholder.languageOrSystem": "中文、混合、構造語階段……",
+    "placeholder.entryType": "日記、手稿、摘錄、書信、筆記……",
+    "placeholder.optional": "可留空",
     "placeholder.tags": "以逗號分隔標籤",
-    "placeholder.choosePdfFile": "選擇 PDF 文件",
-    "option.day": "日",
-    "option.month": "月",
-    "option.year": "年",
-    "option.approximate": "約略",
-    "option.unknown": "未知",
-    "option.none": "無",
-    "option.partial": "部分",
-    "option.complete": "完成",
-    "option.summaryOnly": "僅摘要",
-    "option.clear": "清晰",
-    "option.medium": "中等",
-    "option.difficult": "困難",
-    "option.nearlyIllegible": "幾乎無法辨識",
-    "confirm.deleteEntry": "要刪除此條目，並將其受管 PDF 移到史料庫垃圾桶嗎？",
+    "placeholder.choosePdfFile": "選擇 PDF 檔案",
+    "option.known": "具體值",
+    "option.uncertain": "不確定",
+    "option.notSet": "未設定",
+    "confirm.deleteEntry": "要刪除此條目並將其受管檔案移到史料庫 trash/ 嗎？",
     "result.matchedField.title": "標題",
     "result.matchedField.description": "描述",
     "result.matchedField.entry_type": "條目類型",
     "result.matchedField.tags_json": "標籤",
-    "result.matchedField.language_or_system": "語言或系統",
     "result.matchedField.summary": "摘要",
     "result.matchedField.keywords_json": "關鍵詞",
     "result.matchedField.page_notes": "頁面備註",
     "result.matchedField.transcription_text": "可檢索文本",
-    "result.matchedField.special_glyph_note": "特殊字形備註",
   },
   en: {
     "app.name": "Personal Manuscript Archive",
@@ -273,7 +247,7 @@ export const translations: Record<Locale, Record<TranslationKey, TranslationValu
     "archive.changeRoot": "Change Archive Root Folder",
     "archive.chooseRoot": "Choose Archive Root Folder",
     "dialog.newEntry": "New Entry",
-    "dialog.createImportPdf": "Create Entry and Import Canonical PDF",
+    "dialog.createImportPdf": "Create Entry and Import PDF Source Pages",
     "common.close": "Close",
     "common.cancel": "Cancel",
     "common.refresh": "Refresh",
@@ -283,6 +257,7 @@ export const translations: Record<Locale, Record<TranslationKey, TranslationValu
     "common.entry": "Entry",
     "common.entries": "Entries",
     "common.untitledPage": "Untitled Page",
+    "common.unknown": "Unknown",
     "nav.searchPlaceholder": "Search info or searchable text...",
     "nav.metadataSearch": "Info Search",
     "nav.fullTextSearch": "Full-Text Search",
@@ -292,22 +267,21 @@ export const translations: Record<Locale, Record<TranslationKey, TranslationValu
     "nav.matches": ({ count }) => `${count} matches`,
     "nav.pageResult": "Page Result",
     "nav.entryResult": "Entry Result",
-    "nav.show": "Show",
-    "nav.hide": "Hide",
-    "viewer.loadPdfPrompt": "Please select an entry that has a canonical PDF.",
+    "nav.timeUnknown": "Time Unknown",
+    "nav.empty": "No entries yet",
+    "viewer.loadPdfPrompt": "Select a page to load its source PDF.",
     "viewer.loadingPdf": "Loading PDF...",
     "viewer.unableToLoadPdf": ({ error }) => `Unable to load PDF: ${error}`,
-    "viewer.previous": "Previous Page",
-    "viewer.next": "Next Page",
+    "viewer.previous": "Previous",
+    "viewer.next": "Next",
     "viewer.jump": "Go to Page",
-    "viewer.zoomOut": "Zoom Out",
-    "viewer.zoomIn": "Zoom In",
-    "viewer.fitWidth": "Fit to Width",
-    "viewer.fitPage": "Fit to Page",
+    "viewer.fitWidth": "Fit Width",
+    "viewer.fitPage": "Fit Page",
     "viewer.pageCounter": ({ current, total }) => `Page ${current} / ${total}`,
     "viewer.zoomHelp": "Use Ctrl + mouse wheel to zoom",
+    "viewer.zoomLabel": "Zoom",
     "editor.editor": "Editor",
-    "editor.selectEntryOrPage": "Select an entry or page to edit info and searchable text.",
+    "editor.selectEntryOrPage": "Select an entry or page to edit archive info and searchable text.",
     "editor.inspector": "Inspector",
     "editor.metadata": "Info",
     "editor.transcription": "Transcription",
@@ -316,96 +290,81 @@ export const translations: Record<Locale, Record<TranslationKey, TranslationValu
     "editor.pageMetadata": "Page Info",
     "editor.pageTranscription": "Page Searchable Text",
     "editor.nothingSelected": "Nothing Selected",
-    "editor.selectPageForTranscription": "Select a page to edit that page’s single searchable text.",
+    "editor.selectPageForTranscription": "Select a page to edit that page's single searchable text.",
     "editor.autosave": "Changes are saved automatically after a short pause.",
     "field.title": "Title",
     "field.entryType": "Entry Type",
-    "field.dateFrom": "Start Date",
-    "field.dateTo": "End Date",
-    "field.datePrecision": "Date Precision",
-    "field.languageOrSystem": "Language or System",
+    "field.date": "Date",
+    "field.dateYear": "Year",
+    "field.dateMonth": "Month",
+    "field.dateDay": "Day",
+    "field.datePartMode": "Date Mode",
+    "field.dateNote": "Date Note",
     "field.tags": "Tags",
-    "field.sourceForm": "Source Form",
-    "field.status": "Status",
     "field.description": "Description",
     "field.notes": "Notes",
-    "field.canonicalPdf": "Canonical PDF",
+    "field.canonicalPdf": "Source PDF",
     "field.pageNumber": "Page Number",
     "field.pageLabel": "Page Label",
+    "field.pageOrder": "Sort Order",
+    "field.sourcePdf": "Source PDF",
+    "field.sourcePdfPage": "Source PDF Page",
+    "field.originalPageNumber": "Original Page Number",
     "field.summary": "Summary",
     "field.keywords": "Keywords",
-    "field.transcriptionStatus": "Transcription Status",
-    "field.legibility": "Legibility",
-    "field.containsSpecialGlyphs": "Contains Special Glyphs",
-    "field.specialGlyphNote": "Special Glyph Note",
     "field.pageNotes": "Page Notes",
     "field.transcriptionText": "Searchable Text",
     "button.choosePdf": "Choose PDF",
     "button.createEntry": "Create Entry",
     "button.importResource": "Import Resource",
     "button.deleteResource": "Delete Resource",
-    "button.importing": "Importing...",
-    "prompt.importExtract": "Automatically extract plain text into the transcription during import?",
-    "prompt.transcriptionExists": "A transcription already exists. Please choose how to continue.",
-    "option.saveResourceOnly": "Save as Resource Only",
-    "option.saveResourceAndExtract":
-      "Save as a resource and automatically extract plain text into the transcription",
-    "option.replaceTranscription": "Replace Existing Transcription",
-    "option.appendTranscription": "Append to Existing Transcription",
-    "option.cancelInsertion": "Cancel This Insertion",
-    "notice.extractionSuccess": "Plain text was extracted successfully",
+    "button.importPdfPages": "Import PDF Pages",
+    "button.importing": "Working...",
+    "prompt.importExtract": "Extract as transcription automatically during import?",
+    "prompt.transcriptionExists": "A transcription already exists. Please choose how to proceed",
+    "option.saveResourceOnly": "Save as resource only",
+    "option.saveResourceAndExtract": "Save as resource and automatically extract plain text into transcription",
+    "option.replaceTranscription": "Replace existing transcription",
+    "option.appendTranscription": "Append to existing transcription",
+    "option.cancelInsertion": "Cancel this insertion",
+    "notice.extractionSuccess": "Plain text extracted successfully",
     "notice.extractionFailed": "Unable to extract plain text from this file",
     "notice.extractionUnsupported": "Automatic extraction is not supported for this file type yet",
     "hint.searchableTextOnly":
-      "This field stores the page’s single searchable text. Use it for search, indexing, and quick content recognition, not for reconstructing the original formatting. Use placeholders such as [G001] or [UNK-1] for unusual glyphs.",
-    "hint.resourcesRole":
-      "Attached digital resources are listed here as supporting materials. They do not replace the canonical PDF in the center reading pane.",
-    "resources.empty": "No attached digital resources for this entry yet.",
-    "placeholder.entryTitle": "Entry Title",
-    "placeholder.entryType": "Diary, manuscript, excerpt...",
-    "placeholder.dateFrom": "YYYY-MM-DD or free text",
+      "This field stores the page's single searchable text for search, indexing, and fast recognition, not for reconstructing original formatting.",
+    "hint.resourcesRole": "Attached digital resources are listed here for reference and extraction work, but they do not replace the main reading PDF.",
+    "resources.empty": "No attached digital resources for this entry yet",
+    "placeholder.entryTitle": "Entry title",
+    "placeholder.entryType": "Diary, manuscript, excerpt, letter, notes...",
     "placeholder.optional": "Optional",
-    "placeholder.languageOrSystem": "Chinese, mixed, conlang stage...",
-    "placeholder.tags": "Separate tags with commas",
+    "placeholder.tags": "Comma-separated tags",
     "placeholder.choosePdfFile": "Choose a PDF file",
-    "option.day": "Day",
-    "option.month": "Month",
-    "option.year": "Year",
-    "option.approximate": "Approximate",
-    "option.unknown": "Unknown",
-    "option.none": "None",
-    "option.partial": "Partial",
-    "option.complete": "Complete",
-    "option.summaryOnly": "Summary Only",
-    "option.clear": "Clear",
-    "option.medium": "Medium",
-    "option.difficult": "Difficult",
-    "option.nearlyIllegible": "Nearly Illegible",
-    "confirm.deleteEntry": "Delete this entry and move its managed PDF to the archive trash?",
+    "option.known": "Known",
+    "option.uncertain": "Uncertain",
+    "option.notSet": "Not set",
+    "confirm.deleteEntry": "Delete this entry and move its managed files into trash/?",
     "result.matchedField.title": "Title",
     "result.matchedField.description": "Description",
     "result.matchedField.entry_type": "Entry Type",
     "result.matchedField.tags_json": "Tags",
-    "result.matchedField.language_or_system": "Language or System",
     "result.matchedField.summary": "Summary",
     "result.matchedField.keywords_json": "Keywords",
     "result.matchedField.page_notes": "Page Notes",
     "result.matchedField.transcription_text": "Searchable Text",
-    "result.matchedField.special_glyph_note": "Special Glyph Note",
   },
   de: {
-    "app.name": "Persönliches Manuskriptarchiv",
+    "app.name": "Persönliches Handschriftenarchiv",
     "app.desktopArchive": "Desktop-Archiv",
     "app.language": "Sprache",
     "archive.localArchive": "Lokales Archiv",
-    "archive.chooseRootTitle": "Stammordner des Archivs auswählen",
+    "archive.chooseRootTitle": "Archivwurzel auswählen",
     "archive.description":
-      "Wähle einen Stammordner für das Archiv aus. Datenbank, verwaltete Dateien, Vorschaubilder, Exporte und Papierkorb werden dort in einer sichtbaren Ordnerstruktur gespeichert.",
+      "Wähle einen Archivordner aus. Datenbank, verwaltete Dateien, Vorschaubilder, Exporte und Papierkorb werden dort in einer sichtbaren Ordnerstruktur gespeichert.",
     "archive.opening": "Archiv wird geöffnet...",
-    "archive.changeRoot": "Stammordner des Archivs ändern",
-    "archive.chooseRoot": "Stammordner des Archivs auswählen",
+    "archive.changeRoot": "Archivwurzel ändern",
+    "archive.chooseRoot": "Archivwurzel auswählen",
     "dialog.newEntry": "Neuer Eintrag",
-    "dialog.createImportPdf": "Eintrag erstellen und Haupt-PDF importieren",
+    "dialog.createImportPdf": "Eintrag anlegen und PDF-Quellseiten importieren",
     "common.close": "Schließen",
     "common.cancel": "Abbrechen",
     "common.refresh": "Aktualisieren",
@@ -415,114 +374,99 @@ export const translations: Record<Locale, Record<TranslationKey, TranslationValu
     "common.entry": "Eintrag",
     "common.entries": "Einträge",
     "common.untitledPage": "Unbenannte Seite",
+    "common.unknown": "Unbekannt",
     "nav.searchPlaceholder": "Informationen oder durchsuchbaren Text suchen...",
-    "nav.metadataSearch": "Informationssuche",
+    "nav.metadataSearch": "Infosuche",
     "nav.fullTextSearch": "Volltextsuche",
     "nav.newEntry": "Neuer Eintrag",
     "nav.deleteEntry": "Eintrag löschen",
     "nav.results": "Ergebnisse",
     "nav.matches": ({ count }) => `${count} Treffer`,
-    "nav.pageResult": "Seitenfund",
-    "nav.entryResult": "Eintragsfund",
-    "nav.show": "Einblenden",
-    "nav.hide": "Ausblenden",
-    "viewer.loadPdfPrompt": "Bitte wähle zuerst einen Eintrag mit Haupt-PDF aus.",
+    "nav.pageResult": "Seitentreffer",
+    "nav.entryResult": "Eintragstreffer",
+    "nav.timeUnknown": "Zeit unklar",
+    "nav.empty": "Noch keine Einträge",
+    "viewer.loadPdfPrompt": "Wähle eine Seite aus, um ihr Quell-PDF zu laden.",
     "viewer.loadingPdf": "PDF wird geladen...",
     "viewer.unableToLoadPdf": ({ error }) => `PDF konnte nicht geladen werden: ${error}`,
-    "viewer.previous": "Vorherige Seite",
-    "viewer.next": "Nächste Seite",
+    "viewer.previous": "Zurück",
+    "viewer.next": "Weiter",
     "viewer.jump": "Zu Seite",
-    "viewer.zoomOut": "Verkleinern",
-    "viewer.zoomIn": "Vergrößern",
     "viewer.fitWidth": "An Breite anpassen",
     "viewer.fitPage": "An Seite anpassen",
     "viewer.pageCounter": ({ current, total }) => `Seite ${current} / ${total}`,
     "viewer.zoomHelp": "Mit Strg + Mausrad zoomen",
+    "viewer.zoomLabel": "Zoom",
     "editor.editor": "Editor",
-    "editor.selectEntryOrPage": "Wähle einen Eintrag oder eine Seite aus, um Informationen und durchsuchbaren Text zu bearbeiten.",
+    "editor.selectEntryOrPage": "Wähle einen Eintrag oder eine Seite aus, um Archivdaten und durchsuchbaren Text zu bearbeiten.",
     "editor.inspector": "Inspektor",
     "editor.metadata": "Info",
     "editor.transcription": "Transkription",
     "editor.resources": "Ressourcen",
-    "editor.entryMetadata": "Eintragsinfo",
-    "editor.pageMetadata": "Seiteninfo",
+    "editor.entryMetadata": "Eintragsdaten",
+    "editor.pageMetadata": "Seitendaten",
     "editor.pageTranscription": "Durchsuchbarer Seitentext",
     "editor.nothingSelected": "Nichts ausgewählt",
-    "editor.selectPageForTranscription": "Wähle eine Seite aus, um den einzigen durchsuchbaren Text dieser Seite zu bearbeiten.",
+    "editor.selectPageForTranscription": "Wähle eine Seite aus, um ihren einzigen durchsuchbaren Text zu bearbeiten.",
     "editor.autosave": "Änderungen werden nach einer kurzen Pause automatisch gespeichert.",
     "field.title": "Titel",
     "field.entryType": "Eintragstyp",
-    "field.dateFrom": "Startdatum",
-    "field.dateTo": "Enddatum",
-    "field.datePrecision": "Datumsgenauigkeit",
-    "field.languageOrSystem": "Sprache oder System",
-    "field.tags": "Tags",
-    "field.sourceForm": "Quellform",
-    "field.status": "Status",
+    "field.date": "Datum",
+    "field.dateYear": "Jahr",
+    "field.dateMonth": "Monat",
+    "field.dateDay": "Tag",
+    "field.datePartMode": "Datumsmodus",
+    "field.dateNote": "Datumsnotiz",
+    "field.tags": "Schlagwörter",
     "field.description": "Beschreibung",
     "field.notes": "Notizen",
-    "field.canonicalPdf": "Haupt-PDF",
+    "field.canonicalPdf": "Quell-PDF",
     "field.pageNumber": "Seitennummer",
-    "field.pageLabel": "Seitenbezeichnung",
+    "field.pageLabel": "Seitenlabel",
+    "field.pageOrder": "Reihenfolge",
+    "field.sourcePdf": "Quell-PDF",
+    "field.sourcePdfPage": "PDF-Seitenindex",
+    "field.originalPageNumber": "Ursprüngliche Seitenzahl",
     "field.summary": "Zusammenfassung",
-    "field.keywords": "Schlüsselwörter",
-    "field.transcriptionStatus": "Transkriptionsstatus",
-    "field.legibility": "Lesbarkeit",
-    "field.containsSpecialGlyphs": "Enthält besondere Glyphen",
-    "field.specialGlyphNote": "Hinweis zu besonderen Glyphen",
+    "field.keywords": "Stichwörter",
     "field.pageNotes": "Seitennotizen",
     "field.transcriptionText": "Durchsuchbarer Text",
     "button.choosePdf": "PDF auswählen",
-    "button.createEntry": "Eintrag erstellen",
+    "button.createEntry": "Eintrag anlegen",
     "button.importResource": "Ressource importieren",
     "button.deleteResource": "Ressource löschen",
-    "button.importing": "Import läuft...",
-    "prompt.importExtract": "Beim Import Klartext automatisch in die Transkription übernehmen?",
-    "prompt.transcriptionExists": "Es ist bereits eine Transkription vorhanden. Bitte wähle aus, wie fortgefahren werden soll.",
+    "button.importPdfPages": "PDF-Seiten importieren",
+    "button.importing": "Wird verarbeitet...",
+    "prompt.importExtract": "Klartext beim Import automatisch als Transkription übernehmen?",
+    "prompt.transcriptionExists": "Es ist bereits eine Transkription vorhanden. Bitte wähle aus, wie fortgefahren werden soll",
     "option.saveResourceOnly": "Nur als Ressource speichern",
-    "option.saveResourceAndExtract":
-      "Als Ressource speichern und Klartext automatisch in die Transkription übernehmen",
+    "option.saveResourceAndExtract": "Als Ressource speichern und Klartext automatisch in die Transkription übernehmen",
     "option.replaceTranscription": "Vorhandene Transkription ersetzen",
-    "option.appendTranscription": "An vorhandene Transkription anhängen",
+    "option.appendTranscription": "An die vorhandene Transkription anhängen",
     "option.cancelInsertion": "Diesen Vorgang abbrechen",
-    "notice.extractionSuccess": "Der Klartext wurde erfolgreich extrahiert",
+    "notice.extractionSuccess": "Klartext wurde erfolgreich extrahiert",
     "notice.extractionFailed": "Aus dieser Datei konnte kein Klartext extrahiert werden",
-    "notice.extractionUnsupported": "Für diesen Dateityp wird die automatische Extraktion derzeit noch nicht unterstützt",
+    "notice.extractionUnsupported": "Für diesen Dateityp wird die automatische Extraktion derzeit nicht unterstützt",
     "hint.searchableTextOnly":
-      "Dieses Feld speichert den einzigen durchsuchbaren Text der Seite. Es dient der Suche, der Indizierung und der schnellen inhaltlichen Orientierung, nicht der Rekonstruktion der ursprünglichen Formatierung. Verwende Platzhalter wie [G001] oder [UNK-1] für ungewöhnliche Glyphen.",
-    "hint.resourcesRole":
-      "Angehängte digitale Ressourcen werden hier als Zusatzmaterial aufgeführt. Sie ersetzen nicht das Haupt-PDF im mittleren Lesebereich.",
-    "resources.empty": "Für diesen Eintrag sind noch keine digitalen Ressourcen vorhanden.",
+      "Dieses Feld speichert den einzigen durchsuchbaren Text der Seite für Suche, Indexierung und schnelle Orientierung, nicht zur Rekonstruktion des ursprünglichen Layouts.",
+    "hint.resourcesRole": "Angehängte digitale Ressourcen werden hier als Hilfsmaterial geführt, ersetzen aber nicht das zentrale Lese-PDF.",
+    "resources.empty": "Für diesen Eintrag sind noch keine digitalen Ressourcen vorhanden",
     "placeholder.entryTitle": "Titel des Eintrags",
-    "placeholder.entryType": "Tagebuch, Manuskript, Auszug...",
-    "placeholder.dateFrom": "JJJJ-MM-TT oder Freitext",
+    "placeholder.entryType": "Tagebuch, Manuskript, Exzerpt, Brief, Notizen...",
     "placeholder.optional": "Optional",
-    "placeholder.languageOrSystem": "Chinesisch, gemischt, Conlang-Stufe...",
-    "placeholder.tags": "Tags durch Kommas trennen",
+    "placeholder.tags": "Kommagetrennte Schlagwörter",
     "placeholder.choosePdfFile": "PDF-Datei auswählen",
-    "option.day": "Tag",
-    "option.month": "Monat",
-    "option.year": "Jahr",
-    "option.approximate": "Ungefähr",
-    "option.unknown": "Unbekannt",
-    "option.none": "Keine",
-    "option.partial": "Teilweise",
-    "option.complete": "Vollständig",
-    "option.summaryOnly": "Nur Zusammenfassung",
-    "option.clear": "Klar",
-    "option.medium": "Mittel",
-    "option.difficult": "Schwierig",
-    "option.nearlyIllegible": "Fast unleserlich",
-    "confirm.deleteEntry": "Diesen Eintrag löschen und das verwaltete PDF in den Archivpapierkorb verschieben?",
+    "option.known": "Bekannt",
+    "option.uncertain": "Unsicher",
+    "option.notSet": "Nicht gesetzt",
+    "confirm.deleteEntry": "Diesen Eintrag löschen und seine verwalteten Dateien nach trash/ verschieben?",
     "result.matchedField.title": "Titel",
     "result.matchedField.description": "Beschreibung",
     "result.matchedField.entry_type": "Eintragstyp",
-    "result.matchedField.tags_json": "Tags",
-    "result.matchedField.language_or_system": "Sprache oder System",
+    "result.matchedField.tags_json": "Schlagwörter",
     "result.matchedField.summary": "Zusammenfassung",
-    "result.matchedField.keywords_json": "Schlüsselwörter",
+    "result.matchedField.keywords_json": "Stichwörter",
     "result.matchedField.page_notes": "Seitennotizen",
     "result.matchedField.transcription_text": "Durchsuchbarer Text",
-    "result.matchedField.special_glyph_note": "Hinweis zu besonderen Glyphen",
   },
 };

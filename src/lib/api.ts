@@ -6,6 +6,8 @@ import type {
   EntryRecord,
   ImportAssetInput,
   ImportAssetResult,
+  ImportEntryPdfInput,
+  ImportEntryPdfResult,
   PageRecord,
   SearchMode,
   SearchResult,
@@ -21,6 +23,10 @@ export async function loadArchive(rootPath: string): Promise<ArchiveSnapshot> {
 
 export async function createEntry(rootPath: string, input: CreateEntryInput): Promise<CreateEntryResult> {
   return invoke("create_entry", { rootPath, input });
+}
+
+export async function importEntryPdf(rootPath: string, input: ImportEntryPdfInput): Promise<ImportEntryPdfResult> {
+  return invoke("import_entry_pdf", { rootPath, input });
 }
 
 export async function updateEntry(rootPath: string, entry: EntryRecord): Promise<EntryRecord> {

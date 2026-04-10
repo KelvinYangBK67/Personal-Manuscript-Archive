@@ -1,20 +1,21 @@
 export type SearchMode = "metadata" | "full_text";
 export type EditorTab = "metadata" | "transcription" | "resources";
+export type DatePartMode = "known" | "uncertain";
 
 export interface EntryRecord {
   id: string;
   title: string;
   entry_type: string | null;
-  date_from: string | null;
-  date_to: string | null;
-  date_precision: string | null;
+  date_year: number | null;
+  date_month: number | null;
+  date_day: number | null;
+  date_year_uncertain: number;
+  date_month_uncertain: number;
+  date_day_uncertain: number;
+  date_note: string | null;
   description: string | null;
-  language_or_system: string | null;
   tags_json: string | null;
-  source_form: string | null;
-  canonical_pdf_path: string | null;
   page_count: number;
-  status: string | null;
   notes: string | null;
   created_at: string;
   updated_at: string;
@@ -25,14 +26,14 @@ export interface PageRecord {
   entry_id: string;
   page_number: number | null;
   page_label: string | null;
-  pdf_page_index: number;
+  sort_order: number;
+  source_asset_id: string | null;
+  source_pdf_path: string | null;
+  source_pdf_page_index: number;
+  original_page_number: number | null;
   transcription_text: string | null;
   summary: string | null;
   keywords_json: string | null;
-  transcription_status: string | null;
-  contains_special_glyphs: number;
-  special_glyph_note: string | null;
-  legibility: string | null;
   page_notes: string | null;
   created_at: string;
   updated_at: string;
@@ -74,14 +75,15 @@ export interface SearchResult {
 export interface CreateEntryInput {
   title: string;
   entry_type: string;
-  date_from: string;
-  date_to: string;
-  date_precision: string;
+  date_year: number | null;
+  date_month: number | null;
+  date_day: number | null;
+  date_year_uncertain: number;
+  date_month_uncertain: number;
+  date_day_uncertain: number;
+  date_note: string;
   description: string;
-  language_or_system: string;
   tags: string[];
-  source_form: string;
-  status: string;
   notes: string;
   canonical_pdf_source: string;
 }
@@ -89,6 +91,16 @@ export interface CreateEntryInput {
 export interface CreateEntryResult {
   snapshot: ArchiveSnapshot;
   selected_entry_id: string;
+  selected_page_id: string | null;
+}
+
+export interface ImportEntryPdfInput {
+  entry_id: string;
+  source_path: string;
+}
+
+export interface ImportEntryPdfResult {
+  snapshot: ArchiveSnapshot;
   selected_page_id: string | null;
 }
 

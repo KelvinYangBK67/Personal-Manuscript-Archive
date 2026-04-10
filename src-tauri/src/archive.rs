@@ -31,16 +31,16 @@ pub struct EntryRecord {
     pub id: String,
     pub title: String,
     pub entry_type: Option<String>,
-    pub date_from: Option<String>,
-    pub date_to: Option<String>,
-    pub date_precision: Option<String>,
+    pub date_year: Option<i64>,
+    pub date_month: Option<i64>,
+    pub date_day: Option<i64>,
+    pub date_year_uncertain: i64,
+    pub date_month_uncertain: i64,
+    pub date_day_uncertain: i64,
+    pub date_note: Option<String>,
     pub description: Option<String>,
-    pub language_or_system: Option<String>,
     pub tags_json: Option<String>,
-    pub source_form: Option<String>,
-    pub canonical_pdf_path: Option<String>,
     pub page_count: i64,
-    pub status: Option<String>,
     pub notes: Option<String>,
     pub created_at: String,
     pub updated_at: String,
@@ -52,14 +52,14 @@ pub struct PageRecord {
     pub entry_id: String,
     pub page_number: Option<i64>,
     pub page_label: Option<String>,
-    pub pdf_page_index: i64,
+    pub sort_order: i64,
+    pub source_asset_id: Option<String>,
+    pub source_pdf_path: Option<String>,
+    pub source_pdf_page_index: i64,
+    pub original_page_number: Option<i64>,
     pub transcription_text: Option<String>,
     pub summary: Option<String>,
     pub keywords_json: Option<String>,
-    pub transcription_status: Option<String>,
-    pub contains_special_glyphs: i64,
-    pub special_glyph_note: Option<String>,
-    pub legibility: Option<String>,
     pub page_notes: Option<String>,
     pub created_at: String,
     pub updated_at: String,
@@ -94,16 +94,23 @@ pub struct ArchiveSnapshot {
 pub struct CreateEntryInput {
     pub title: String,
     pub entry_type: String,
-    pub date_from: String,
-    pub date_to: String,
-    pub date_precision: String,
+    pub date_year: Option<i64>,
+    pub date_month: Option<i64>,
+    pub date_day: Option<i64>,
+    pub date_year_uncertain: i64,
+    pub date_month_uncertain: i64,
+    pub date_day_uncertain: i64,
+    pub date_note: String,
     pub description: String,
-    pub language_or_system: String,
     pub tags: Vec<String>,
-    pub source_form: String,
-    pub status: String,
     pub notes: String,
     pub canonical_pdf_source: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ImportEntryPdfInput {
+    pub entry_id: String,
+    pub source_path: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -188,6 +195,17 @@ fn connection_for_root(root: &Path) -> ArchiveResult<Connection> {
     Ok(connection)
 }
 
+fn column_exists(connection: &Connection, table: &str, column: &str) -> ArchiveResult<bool> {
+    let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
+    let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
+    for column_name in rows {
+        if column_name? == column {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 fn initialize_schema(connection: &Connection) -> ArchiveResult<()> {
     connection.execute_batch(
         "
@@ -197,16 +215,17 @@ fn initialize_schema(connection: &Connection) -> ArchiveResult<()> {
           id TEXT PRIMARY KEY,
           title TEXT NOT NULL,
           entry_type TEXT,
-          date_from TEXT,
-          date_to TEXT,
-          date_precision TEXT,
+          date_year INTEGER,
+          date_month INTEGER,
+          date_day INTEGER,
+          date_year_uncertain INTEGER DEFAULT 0,
+          date_month_uncertain INTEGER DEFAULT 0,
+          date_day_uncertain INTEGER DEFAULT 0,
+          date_note TEXT,
           description TEXT,
           language_or_system TEXT,
           tags_json TEXT,
-          source_form TEXT,
-          canonical_pdf_path TEXT,
           page_count INTEGER DEFAULT 0,
-          status TEXT,
           notes TEXT,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
@@ -217,14 +236,15 @@ fn initialize_schema(connection: &Connection) -> ArchiveResult<()> {
           entry_id TEXT NOT NULL,
           page_number INTEGER,
           page_label TEXT,
-          pdf_page_index INTEGER NOT NULL,
+          sort_order INTEGER DEFAULT 0,
+          source_asset_id TEXT,
+          source_pdf_path TEXT,
+          source_pdf_page_index INTEGER NOT NULL DEFAULT 0,
+          original_page_number INTEGER,
           transcription_text TEXT,
           summary TEXT,
           keywords_json TEXT,
-          transcription_status TEXT,
-          contains_special_glyphs INTEGER DEFAULT 0,
           special_glyph_note TEXT,
-          legibility TEXT,
           page_notes TEXT,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL,
@@ -258,6 +278,60 @@ fn initialize_schema(connection: &Connection) -> ArchiveResult<()> {
         INSERT OR IGNORE INTO counters (key, value) VALUES ('asset', 0);
         ",
     )?;
+    let _ = connection.execute("ALTER TABLE entries ADD COLUMN date_year INTEGER", []);
+    let _ = connection.execute("ALTER TABLE entries ADD COLUMN date_month INTEGER", []);
+    let _ = connection.execute("ALTER TABLE entries ADD COLUMN date_day INTEGER", []);
+    let _ = connection.execute(
+        "ALTER TABLE entries ADD COLUMN date_year_uncertain INTEGER DEFAULT 0",
+        [],
+    );
+    let _ = connection.execute(
+        "ALTER TABLE entries ADD COLUMN date_month_uncertain INTEGER DEFAULT 0",
+        [],
+    );
+    let _ = connection.execute(
+        "ALTER TABLE entries ADD COLUMN date_day_uncertain INTEGER DEFAULT 0",
+        [],
+    );
+    let _ = connection.execute("ALTER TABLE entries ADD COLUMN date_note TEXT", []);
+
+    let _ = connection.execute("ALTER TABLE pages ADD COLUMN sort_order INTEGER DEFAULT 0", []);
+    let _ = connection.execute("ALTER TABLE pages ADD COLUMN source_asset_id TEXT", []);
+    let _ = connection.execute("ALTER TABLE pages ADD COLUMN source_pdf_path TEXT", []);
+    let _ = connection.execute(
+        "ALTER TABLE pages ADD COLUMN source_pdf_page_index INTEGER DEFAULT 0",
+        [],
+    );
+    let _ = connection.execute("ALTER TABLE pages ADD COLUMN original_page_number INTEGER", []);
+    let _ = connection.execute("ALTER TABLE pages ADD COLUMN special_glyph_note TEXT", []);
+    let has_legacy_pdf_page_index = column_exists(connection, "pages", "pdf_page_index")?;
+    let has_legacy_canonical_pdf_path = column_exists(connection, "entries", "canonical_pdf_path")?;
+    if has_legacy_pdf_page_index && has_legacy_canonical_pdf_path {
+        let _ = connection.execute(
+            "
+            UPDATE pages
+            SET
+              sort_order = COALESCE(NULLIF(sort_order, 0), page_number, pdf_page_index + 1, 1),
+              source_pdf_path = COALESCE(source_pdf_path, (
+                SELECT canonical_pdf_path FROM entries WHERE entries.id = pages.entry_id
+              )),
+              source_pdf_page_index = COALESCE(source_pdf_page_index, pdf_page_index, 0),
+              original_page_number = COALESCE(original_page_number, page_number)
+            ",
+            [],
+        );
+    } else {
+        let _ = connection.execute(
+            "
+            UPDATE pages
+            SET
+              sort_order = COALESCE(NULLIF(sort_order, 0), page_number, 1),
+              source_pdf_page_index = COALESCE(source_pdf_page_index, 0),
+              original_page_number = COALESCE(original_page_number, page_number)
+            ",
+            [],
+        );
+    }
     Ok(())
 }
 
@@ -279,8 +353,8 @@ fn next_id(transaction: &Transaction<'_>, key: &str, prefix: &str) -> ArchiveRes
     Ok(format!("{prefix}{next_value:06}"))
 }
 
-fn relative_pdf_path(entry_id: &str) -> String {
-    format!("assets/pdfs/{entry_id}.pdf")
+fn relative_source_pdf_path(asset_id: &str) -> String {
+    format!("assets/pdfs/{asset_id}.pdf")
 }
 
 fn relative_resource_path(asset_id: &str, extension: Option<&str>) -> String {
@@ -460,11 +534,20 @@ fn load_snapshot_internal(root: &Path) -> ArchiveResult<ArchiveSnapshot> {
     let mut entry_statement = connection.prepare(
         "
         SELECT
-          id, title, entry_type, date_from, date_to, date_precision, description,
-          language_or_system, tags_json, source_form, canonical_pdf_path, page_count,
-          status, notes, created_at, updated_at
+          id, title, entry_type, date_year, date_month, date_day,
+          date_year_uncertain, date_month_uncertain, date_day_uncertain, date_note,
+          description, tags_json, page_count, notes, created_at, updated_at
         FROM entries
-        ORDER BY updated_at DESC, id DESC
+        ORDER BY
+          COALESCE(entry_type, '') ASC,
+          CASE WHEN date_year IS NULL OR date_year_uncertain = 1 THEN 1 ELSE 0 END ASC,
+          date_year ASC,
+          CASE WHEN date_month IS NULL OR date_month_uncertain = 1 THEN 1 ELSE 0 END ASC,
+          date_month ASC,
+          CASE WHEN date_day IS NULL OR date_day_uncertain = 1 THEN 1 ELSE 0 END ASC,
+          date_day ASC,
+          title COLLATE NOCASE ASC,
+          id ASC
         ",
     )?;
 
@@ -473,16 +556,16 @@ fn load_snapshot_internal(root: &Path) -> ArchiveResult<ArchiveSnapshot> {
             id: row.get(0)?,
             title: row.get(1)?,
             entry_type: row.get(2)?,
-            date_from: row.get(3)?,
-            date_to: row.get(4)?,
-            date_precision: row.get(5)?,
-            description: row.get(6)?,
-            language_or_system: row.get(7)?,
-            tags_json: row.get(8)?,
-            source_form: row.get(9)?,
-            canonical_pdf_path: row.get(10)?,
-            page_count: row.get(11)?,
-            status: row.get(12)?,
+            date_year: row.get(3)?,
+            date_month: row.get(4)?,
+            date_day: row.get(5)?,
+            date_year_uncertain: row.get(6)?,
+            date_month_uncertain: row.get(7)?,
+            date_day_uncertain: row.get(8)?,
+            date_note: row.get(9)?,
+            description: row.get(10)?,
+            tags_json: row.get(11)?,
+            page_count: row.get(12)?,
             notes: row.get(13)?,
             created_at: row.get(14)?,
             updated_at: row.get(15)?,
@@ -493,12 +576,12 @@ fn load_snapshot_internal(root: &Path) -> ArchiveResult<ArchiveSnapshot> {
     let mut page_statement = connection.prepare(
         "
         SELECT
-          id, entry_id, page_number, page_label, pdf_page_index, transcription_text,
-          summary, keywords_json, transcription_status, contains_special_glyphs,
-          special_glyph_note, legibility, page_notes, created_at, updated_at
+          id, entry_id, page_number, page_label, sort_order, source_asset_id,
+          source_pdf_path, source_pdf_page_index, original_page_number, transcription_text,
+          summary, keywords_json, page_notes, created_at, updated_at
         FROM pages
         WHERE entry_id = ?1
-        ORDER BY pdf_page_index ASC, id ASC
+        ORDER BY sort_order ASC, id ASC
         ",
     )?;
     let mut asset_statement = connection.prepare(
@@ -519,14 +602,14 @@ fn load_snapshot_internal(root: &Path) -> ArchiveResult<ArchiveSnapshot> {
                 entry_id: row.get(1)?,
                 page_number: row.get(2)?,
                 page_label: row.get(3)?,
-                pdf_page_index: row.get(4)?,
-                transcription_text: row.get(5)?,
-                summary: row.get(6)?,
-                keywords_json: row.get(7)?,
-                transcription_status: row.get(8)?,
-                contains_special_glyphs: row.get(9)?,
-                special_glyph_note: row.get(10)?,
-                legibility: row.get(11)?,
+                sort_order: row.get(4)?,
+                source_asset_id: row.get(5)?,
+                source_pdf_path: row.get(6)?,
+                source_pdf_page_index: row.get(7)?,
+                original_page_number: row.get(8)?,
+                transcription_text: row.get(9)?,
+                summary: row.get(10)?,
+                keywords_json: row.get(11)?,
                 page_notes: row.get(12)?,
                 created_at: row.get(13)?,
                 updated_at: row.get(14)?,
@@ -694,16 +777,16 @@ pub fn delete_asset(root_path: String, asset_id: String) -> Result<ArchiveSnapsh
     let root = normalize_root(&root_path).map_err(to_tauri_error)?;
     let connection = connection_for_root(&root).map_err(to_tauri_error)?;
 
-    let asset_row: Option<(String, String)> = connection
+    let asset_row: Option<(String, String, String)> = connection
         .query_row(
-            "SELECT entry_id, file_path FROM assets WHERE id = ?1",
+            "SELECT entry_id, file_path, asset_type FROM assets WHERE id = ?1",
             params![asset_id.as_str()],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .optional()
         .map_err(to_tauri_error)?;
 
-    let Some((entry_id, relative_path)) = asset_row else {
+    let Some((entry_id, relative_path, asset_type)) = asset_row else {
         return load_snapshot_internal(&root).map_err(to_tauri_error);
     };
 
@@ -721,12 +804,21 @@ pub fn delete_asset(root_path: String, asset_id: String) -> Result<ArchiveSnapsh
     }
 
     let now = now_iso();
+    if asset_type == "pdf" {
+        connection
+            .execute("DELETE FROM pages WHERE source_asset_id = ?1", params![asset_id.as_str()])
+            .map_err(to_tauri_error)?;
+    }
     connection
         .execute("DELETE FROM assets WHERE id = ?1", params![asset_id.as_str()])
         .map_err(to_tauri_error)?;
     connection
         .execute(
-            "UPDATE entries SET updated_at = ?2 WHERE id = ?1",
+            "
+            UPDATE entries
+            SET updated_at = ?2, page_count = (SELECT COUNT(*) FROM pages WHERE entry_id = ?1)
+            WHERE id = ?1
+            ",
             params![entry_id.as_str(), now.as_str()],
         )
         .map_err(to_tauri_error)?;
@@ -745,8 +837,9 @@ pub fn create_entry(root_path: String, input: CreateEntryInput) -> Result<Create
     let mut connection = connection_for_root(&root).map_err(to_tauri_error)?;
     let transaction = connection.transaction().map_err(to_tauri_error)?;
     let entry_id = next_id(&transaction, "entry", "E").map_err(to_tauri_error)?;
+    let asset_id = next_id(&transaction, "asset", "A").map_err(to_tauri_error)?;
     let page_count = read_pdf_page_count(&source_path).map_err(to_tauri_error)? as i64;
-    let relative_pdf = relative_pdf_path(&entry_id);
+    let relative_pdf = relative_source_pdf_path(&asset_id);
     let destination_path = absolute_asset_path(&root, &relative_pdf);
     if let Some(parent) = destination_path.parent() {
         fs::create_dir_all(parent).map_err(to_tauri_error)?;
@@ -755,30 +848,51 @@ pub fn create_entry(root_path: String, input: CreateEntryInput) -> Result<Create
 
     let now = now_iso();
     let tags_json = serde_json::to_string(&input.tags).map_err(|error| error.to_string())?;
+    let file_label = source_path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_string());
     transaction
         .execute(
             "
             INSERT INTO entries (
-              id, title, entry_type, date_from, date_to, date_precision, description,
-              language_or_system, tags_json, source_form, canonical_pdf_path, page_count,
-              status, notes, created_at, updated_at
+              id, title, entry_type, date_year, date_month, date_day,
+              date_year_uncertain, date_month_uncertain, date_day_uncertain, date_note,
+              description, tags_json, page_count, notes, created_at, updated_at
             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
             ",
             params![
                 entry_id.as_str(),
                 input.title.trim(),
                 clean_optional(&input.entry_type),
-                clean_optional(&input.date_from),
-                clean_optional(&input.date_to),
-                clean_optional(&input.date_precision),
+                input.date_year,
+                input.date_month,
+                input.date_day,
+                input.date_year_uncertain,
+                input.date_month_uncertain,
+                input.date_day_uncertain,
+                clean_optional(&input.date_note),
                 clean_optional(&input.description),
-                clean_optional(&input.language_or_system),
                 tags_json,
-                clean_optional(&input.source_form),
-                relative_pdf.as_str(),
                 page_count,
-                clean_optional(&input.status),
                 clean_optional(&input.notes),
+                now.as_str(),
+                now.as_str()
+            ],
+        )
+        .map_err(to_tauri_error)?;
+    transaction
+        .execute(
+            "
+            INSERT INTO assets (
+              id, entry_id, asset_type, file_path, label, notes, created_at, updated_at
+            ) VALUES (?1, ?2, 'pdf', ?3, ?4, NULL, ?5, ?6)
+            ",
+            params![
+                asset_id.as_str(),
+                entry_id.as_str(),
+                relative_pdf.as_str(),
+                file_label,
                 now.as_str(),
                 now.as_str()
             ],
@@ -795,16 +909,21 @@ pub fn create_entry(root_path: String, input: CreateEntryInput) -> Result<Create
             .execute(
                 "
                 INSERT INTO pages (
-                  id, entry_id, page_number, page_label, pdf_page_index, transcription_text,
-                  summary, keywords_json, transcription_status, contains_special_glyphs,
-                  special_glyph_note, legibility, page_notes, created_at, updated_at
-                ) VALUES (?1, ?2, ?3, NULL, ?4, NULL, NULL, '[]', 'none', 0, NULL, 'clear', NULL, ?5, ?6)
+                  id, entry_id, page_number, page_label, sort_order, source_asset_id,
+                  source_pdf_path, source_pdf_page_index, original_page_number,
+                  transcription_text, summary, keywords_json, page_notes,
+                  created_at, updated_at
+                ) VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?6, ?7, ?8, NULL, NULL, '[]', NULL, ?9, ?10)
                 ",
                 params![
                     page_id.as_str(),
                     entry_id.as_str(),
                     pdf_page_index + 1,
+                    pdf_page_index + 1,
+                    asset_id.as_str(),
+                    relative_pdf.as_str(),
                     pdf_page_index,
+                    pdf_page_index + 1,
                     now.as_str(),
                     now.as_str()
                 ],
@@ -822,6 +941,109 @@ pub fn create_entry(root_path: String, input: CreateEntryInput) -> Result<Create
 }
 
 #[tauri::command]
+pub fn import_entry_pdf(root_path: String, input: ImportEntryPdfInput) -> Result<CreateEntryResult, String> {
+    let root = normalize_root(&root_path).map_err(to_tauri_error)?;
+    let source_path = PathBuf::from(input.source_path.trim());
+    if !source_path.exists() {
+        return Err("The selected PDF file does not exist.".into());
+    }
+
+    let mut connection = connection_for_root(&root).map_err(to_tauri_error)?;
+    let transaction = connection.transaction().map_err(to_tauri_error)?;
+    let asset_id = next_id(&transaction, "asset", "A").map_err(to_tauri_error)?;
+    let relative_pdf = relative_source_pdf_path(&asset_id);
+    let destination_path = absolute_asset_path(&root, &relative_pdf);
+    if let Some(parent) = destination_path.parent() {
+        fs::create_dir_all(parent).map_err(to_tauri_error)?;
+    }
+    fs::copy(&source_path, &destination_path).map_err(to_tauri_error)?;
+
+    let now = now_iso();
+    let file_label = source_path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_string());
+    let existing_page_count: i64 = transaction
+        .query_row(
+            "SELECT COUNT(*) FROM pages WHERE entry_id = ?1",
+            params![input.entry_id.as_str()],
+            |row| row.get(0),
+        )
+        .map_err(to_tauri_error)?;
+    let pdf_page_count = read_pdf_page_count(&source_path).map_err(to_tauri_error)? as i64;
+
+    transaction
+        .execute(
+            "
+            INSERT INTO assets (
+              id, entry_id, asset_type, file_path, label, notes, created_at, updated_at
+            ) VALUES (?1, ?2, 'pdf', ?3, ?4, NULL, ?5, ?6)
+            ",
+            params![
+                asset_id.as_str(),
+                input.entry_id.as_str(),
+                relative_pdf.as_str(),
+                file_label,
+                now.as_str(),
+                now.as_str()
+            ],
+        )
+        .map_err(to_tauri_error)?;
+
+    let mut first_page_id: Option<String> = None;
+    for pdf_page_index in 0..pdf_page_count {
+        let page_id = next_id(&transaction, "page", "P").map_err(to_tauri_error)?;
+        if first_page_id.is_none() {
+            first_page_id = Some(page_id.clone());
+        }
+        let sort_order = existing_page_count + pdf_page_index + 1;
+        transaction
+            .execute(
+                "
+                INSERT INTO pages (
+                  id, entry_id, page_number, page_label, sort_order, source_asset_id,
+                  source_pdf_path, source_pdf_page_index, original_page_number,
+                  transcription_text, summary, keywords_json, page_notes,
+                  created_at, updated_at
+                ) VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?6, ?7, ?8, NULL, NULL, '[]', NULL, ?9, ?10)
+                ",
+                params![
+                    page_id.as_str(),
+                    input.entry_id.as_str(),
+                    sort_order,
+                    sort_order,
+                    asset_id.as_str(),
+                    relative_pdf.as_str(),
+                    pdf_page_index,
+                    pdf_page_index + 1,
+                    now.as_str(),
+                    now.as_str()
+                ],
+            )
+            .map_err(to_tauri_error)?;
+    }
+
+    transaction
+        .execute(
+            "
+            UPDATE entries
+            SET page_count = (SELECT COUNT(*) FROM pages WHERE entry_id = ?1), updated_at = ?2
+            WHERE id = ?1
+            ",
+            params![input.entry_id.as_str(), now.as_str()],
+        )
+        .map_err(to_tauri_error)?;
+
+    transaction.commit().map_err(to_tauri_error)?;
+    let snapshot = load_snapshot_internal(&root).map_err(to_tauri_error)?;
+    Ok(CreateEntryResult {
+        snapshot,
+        selected_entry_id: input.entry_id,
+        selected_page_id: first_page_id,
+    })
+}
+
+#[tauri::command]
 pub fn update_entry(root_path: String, entry: EntryRecord) -> Result<EntryRecord, String> {
     let root = normalize_root(&root_path).map_err(to_tauri_error)?;
     let connection = connection_for_root(&root).map_err(to_tauri_error)?;
@@ -832,30 +1054,32 @@ pub fn update_entry(root_path: String, entry: EntryRecord) -> Result<EntryRecord
             UPDATE entries SET
               title = ?2,
               entry_type = ?3,
-              date_from = ?4,
-              date_to = ?5,
-              date_precision = ?6,
-              description = ?7,
-              language_or_system = ?8,
-              tags_json = ?9,
-              source_form = ?10,
-              status = ?11,
-              notes = ?12,
-              updated_at = ?13
+              date_year = ?4,
+              date_month = ?5,
+              date_day = ?6,
+              date_year_uncertain = ?7,
+              date_month_uncertain = ?8,
+              date_day_uncertain = ?9,
+              date_note = ?10,
+              description = ?11,
+              tags_json = ?12,
+              notes = ?13,
+              updated_at = ?14
             WHERE id = ?1
             ",
             params![
                 entry.id.as_str(),
                 entry.title.trim(),
                 entry.entry_type.as_deref(),
-                entry.date_from.as_deref(),
-                entry.date_to.as_deref(),
-                entry.date_precision.as_deref(),
+                entry.date_year,
+                entry.date_month,
+                entry.date_day,
+                entry.date_year_uncertain,
+                entry.date_month_uncertain,
+                entry.date_day_uncertain,
+                entry.date_note.as_deref(),
                 entry.description.as_deref(),
-                entry.language_or_system.as_deref(),
                 entry.tags_json.as_deref(),
-                entry.source_form.as_deref(),
-                entry.status.as_deref(),
                 entry.notes.as_deref(),
                 updated_at.as_str()
             ],
@@ -866,9 +1090,9 @@ pub fn update_entry(root_path: String, entry: EntryRecord) -> Result<EntryRecord
         .query_row(
             "
             SELECT
-              id, title, entry_type, date_from, date_to, date_precision, description,
-              language_or_system, tags_json, source_form, canonical_pdf_path, page_count,
-              status, notes, created_at, updated_at
+              id, title, entry_type, date_year, date_month, date_day,
+              date_year_uncertain, date_month_uncertain, date_day_uncertain, date_note,
+              description, tags_json, page_count, notes, created_at, updated_at
             FROM entries
             WHERE id = ?1
             ",
@@ -878,16 +1102,16 @@ pub fn update_entry(root_path: String, entry: EntryRecord) -> Result<EntryRecord
                     id: row.get(0)?,
                     title: row.get(1)?,
                     entry_type: row.get(2)?,
-                    date_from: row.get(3)?,
-                    date_to: row.get(4)?,
-                    date_precision: row.get(5)?,
-                    description: row.get(6)?,
-                    language_or_system: row.get(7)?,
-                    tags_json: row.get(8)?,
-                    source_form: row.get(9)?,
-                    canonical_pdf_path: row.get(10)?,
-                    page_count: row.get(11)?,
-                    status: row.get(12)?,
+                    date_year: row.get(3)?,
+                    date_month: row.get(4)?,
+                    date_day: row.get(5)?,
+                    date_year_uncertain: row.get(6)?,
+                    date_month_uncertain: row.get(7)?,
+                    date_day_uncertain: row.get(8)?,
+                    date_note: row.get(9)?,
+                    description: row.get(10)?,
+                    tags_json: row.get(11)?,
+                    page_count: row.get(12)?,
                     notes: row.get(13)?,
                     created_at: row.get(14)?,
                     updated_at: row.get(15)?,
@@ -909,28 +1133,24 @@ pub fn update_page(root_path: String, page: PageRecord) -> Result<PageRecord, St
             UPDATE pages SET
               page_number = ?2,
               page_label = ?3,
-              transcription_text = ?4,
-              summary = ?5,
-              keywords_json = ?6,
-              transcription_status = ?7,
-              contains_special_glyphs = ?8,
-              special_glyph_note = ?9,
-              legibility = ?10,
-              page_notes = ?11,
-              updated_at = ?12
+              sort_order = ?4,
+              original_page_number = ?5,
+              transcription_text = ?6,
+              summary = ?7,
+              keywords_json = ?8,
+              page_notes = ?9,
+              updated_at = ?10
             WHERE id = ?1
             ",
             params![
                 page.id.as_str(),
                 page.page_number,
                 page.page_label.as_deref(),
+                page.sort_order,
+                page.original_page_number,
                 page.transcription_text.as_deref(),
                 page.summary.as_deref(),
                 page.keywords_json.as_deref(),
-                page.transcription_status.as_deref(),
-                page.contains_special_glyphs,
-                page.special_glyph_note.as_deref(),
-                page.legibility.as_deref(),
                 page.page_notes.as_deref(),
                 updated_at.as_str()
             ],
@@ -948,9 +1168,9 @@ pub fn update_page(root_path: String, page: PageRecord) -> Result<PageRecord, St
         .query_row(
             "
             SELECT
-              id, entry_id, page_number, page_label, pdf_page_index, transcription_text,
-              summary, keywords_json, transcription_status, contains_special_glyphs,
-              special_glyph_note, legibility, page_notes, created_at, updated_at
+              id, entry_id, page_number, page_label, sort_order, source_asset_id,
+              source_pdf_path, source_pdf_page_index, original_page_number, transcription_text,
+              summary, keywords_json, page_notes, created_at, updated_at
             FROM pages
             WHERE id = ?1
             ",
@@ -961,14 +1181,14 @@ pub fn update_page(root_path: String, page: PageRecord) -> Result<PageRecord, St
                     entry_id: row.get(1)?,
                     page_number: row.get(2)?,
                     page_label: row.get(3)?,
-                    pdf_page_index: row.get(4)?,
-                    transcription_text: row.get(5)?,
-                    summary: row.get(6)?,
-                    keywords_json: row.get(7)?,
-                    transcription_status: row.get(8)?,
-                    contains_special_glyphs: row.get(9)?,
-                    special_glyph_note: row.get(10)?,
-                    legibility: row.get(11)?,
+                    sort_order: row.get(4)?,
+                    source_asset_id: row.get(5)?,
+                    source_pdf_path: row.get(6)?,
+                    source_pdf_page_index: row.get(7)?,
+                    original_page_number: row.get(8)?,
+                    transcription_text: row.get(9)?,
+                    summary: row.get(10)?,
+                    keywords_json: row.get(11)?,
                     page_notes: row.get(12)?,
                     created_at: row.get(13)?,
                     updated_at: row.get(14)?,
@@ -996,21 +1216,19 @@ pub fn search_archive(root_path: String, mode: String, query: String) -> Result<
           p.id,
           e.title,
           p.page_number,
-          COALESCE(p.transcription_text, p.summary, p.page_notes, p.special_glyph_note, ''),
+          COALESCE(p.transcription_text, p.summary, p.page_notes, ''),
           CASE
             WHEN LOWER(COALESCE(p.transcription_text, '')) LIKE ?1 THEN 'transcription_text'
             WHEN LOWER(COALESCE(p.summary, '')) LIKE ?1 THEN 'summary'
-            WHEN LOWER(COALESCE(p.page_notes, '')) LIKE ?1 THEN 'page_notes'
-            ELSE 'special_glyph_note'
+            ELSE 'page_notes'
           END
         FROM pages p
         JOIN entries e ON e.id = p.entry_id
         WHERE
           LOWER(COALESCE(p.transcription_text, '')) LIKE ?1 OR
           LOWER(COALESCE(p.summary, '')) LIKE ?1 OR
-          LOWER(COALESCE(p.page_notes, '')) LIKE ?1 OR
-          LOWER(COALESCE(p.special_glyph_note, '')) LIKE ?1
-        ORDER BY e.updated_at DESC, p.pdf_page_index ASC
+          LOWER(COALESCE(p.page_notes, '')) LIKE ?1
+        ORDER BY e.updated_at DESC, p.sort_order ASC
         LIMIT 200
         "
     } else {
@@ -1030,7 +1248,6 @@ pub fn search_archive(root_path: String, mode: String, query: String) -> Result<
             p.page_notes,
             e.description,
             e.tags_json,
-            e.language_or_system,
             e.entry_type,
             e.title,
             ''
@@ -1040,7 +1257,6 @@ pub fn search_archive(root_path: String, mode: String, query: String) -> Result<
             WHEN LOWER(COALESCE(e.description, '')) LIKE ?1 THEN 'description'
             WHEN LOWER(COALESCE(e.entry_type, '')) LIKE ?1 THEN 'entry_type'
             WHEN LOWER(COALESCE(e.tags_json, '')) LIKE ?1 THEN 'tags_json'
-            WHEN LOWER(COALESCE(e.language_or_system, '')) LIKE ?1 THEN 'language_or_system'
             WHEN LOWER(COALESCE(p.summary, '')) LIKE ?1 THEN 'summary'
             WHEN LOWER(COALESCE(p.keywords_json, '')) LIKE ?1 THEN 'keywords_json'
             ELSE 'page_notes'
@@ -1052,7 +1268,6 @@ pub fn search_archive(root_path: String, mode: String, query: String) -> Result<
           LOWER(COALESCE(e.description, '')) LIKE ?1 OR
           LOWER(COALESCE(e.entry_type, '')) LIKE ?1 OR
           LOWER(COALESCE(e.tags_json, '')) LIKE ?1 OR
-          LOWER(COALESCE(e.language_or_system, '')) LIKE ?1 OR
           LOWER(COALESCE(p.summary, '')) LIKE ?1 OR
           LOWER(COALESCE(p.keywords_json, '')) LIKE ?1 OR
           LOWER(COALESCE(p.page_notes, '')) LIKE ?1
@@ -1100,30 +1315,6 @@ pub fn search_archive(root_path: String, mode: String, query: String) -> Result<
 pub fn delete_entry(root_path: String, entry_id: String) -> Result<ArchiveSnapshot, String> {
     let root = normalize_root(&root_path).map_err(to_tauri_error)?;
     let connection = connection_for_root(&root).map_err(to_tauri_error)?;
-    let canonical_pdf_path: Option<String> = connection
-        .query_row(
-            "SELECT canonical_pdf_path FROM entries WHERE id = ?1",
-            params![entry_id.as_str()],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(to_tauri_error)?
-        .flatten();
-
-    if let Some(relative_path) = canonical_pdf_path {
-        let source = absolute_asset_path(&root, &relative_path);
-        if source.exists() {
-            let file_name = source
-                .file_name()
-                .and_then(|value| value.to_str())
-                .unwrap_or("archived.pdf");
-            let destination = unique_trash_destination(&root, file_name);
-            if let Some(parent) = destination.parent() {
-                fs::create_dir_all(parent).map_err(to_tauri_error)?;
-            }
-            fs::rename(source, destination).map_err(to_tauri_error)?;
-        }
-    }
 
     let mut asset_statement = connection
         .prepare("SELECT file_path FROM assets WHERE entry_id = ?1")
