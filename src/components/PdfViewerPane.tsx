@@ -1,0 +1,339 @@
+import { memo, useEffect, useMemo, useRef, useState, type WheelEvent } from "react";
+import { getDocument, GlobalWorkerOptions, type PDFDocumentProxy } from "pdfjs-dist";
+import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import { useI18n } from "../i18n/I18nProvider";
+
+GlobalWorkerOptions.workerSrc = workerUrl;
+
+type ZoomMode = "fit-width" | "fit-page" | "manual";
+
+const zoomOptions = [50, 75, 100, 125, 150, 200];
+const minimumManualZoom = 25;
+const maximumManualZoom = 300;
+
+interface PdfViewerPaneProps {
+  pdfData: Uint8Array | null;
+  currentPageIndex: number;
+  pageCount: number;
+  onPageIndexChange: (pageIndex: number) => void;
+}
+
+interface ScrollAnchor {
+  contentX: number;
+  contentY: number;
+  clientX: number;
+  clientY: number;
+}
+
+function clampZoom(percent: number) {
+  return Math.min(Math.max(percent, minimumManualZoom), maximumManualZoom);
+}
+
+export const PdfViewerPane = memo(function PdfViewerPane(props: PdfViewerPaneProps) {
+  const { t } = useI18n();
+  const { pdfData, currentPageIndex, pageCount, onPageIndexChange } = props;
+  const [documentRef, setDocumentRef] = useState<PDFDocumentProxy | null>(null);
+  const [loadState, setLoadState] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [loadError, setLoadError] = useState("");
+  const [zoomMode, setZoomMode] = useState<ZoomMode>("fit-width");
+  const [manualZoomPercent, setManualZoomPercent] = useState(125);
+  const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
+  const [pageBaseSize, setPageBaseSize] = useState({ width: 0, height: 0 });
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const viewerScrollRef = useRef<HTMLDivElement | null>(null);
+  const pendingScrollAnchorRef = useRef<ScrollAnchor | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setDocumentRef(null);
+    setLoadError("");
+
+    if (!pdfData) {
+      setLoadState("idle");
+      return;
+    }
+
+    setLoadState("loading");
+    const loadingTask = getDocument({ data: pdfData });
+    loadingTask.promise
+      .then((pdf) => {
+        if (!cancelled) {
+          setDocumentRef(pdf);
+          setLoadState("ready");
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setLoadError(String(error));
+          setLoadState("error");
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      void loadingTask.destroy();
+    };
+  }, [pdfData]);
+
+  useEffect(() => {
+    const element = viewerScrollRef.current;
+    if (!element) {
+      return;
+    }
+
+    function updateSize() {
+      const currentElement = viewerScrollRef.current;
+      if (!currentElement) {
+        return;
+      }
+      setContainerSize({
+        width: currentElement.clientWidth,
+        height: currentElement.clientHeight,
+      });
+    }
+
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function readPageMetrics() {
+      if (!documentRef) {
+        setPageBaseSize({ width: 0, height: 0 });
+        return;
+      }
+
+      const pageNumber = Math.min(Math.max(currentPageIndex + 1, 1), documentRef.numPages);
+      const page = await documentRef.getPage(pageNumber);
+      const viewport = page.getViewport({ scale: 1 });
+
+      if (!cancelled) {
+        setPageBaseSize({
+          width: viewport.width,
+          height: viewport.height,
+        });
+      }
+    }
+
+    void readPageMetrics();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentPageIndex, documentRef]);
+
+  const effectiveScale = useMemo(() => {
+    if (zoomMode === "manual") {
+      return manualZoomPercent / 100;
+    }
+
+    if (pageBaseSize.width === 0 || pageBaseSize.height === 0) {
+      return 1;
+    }
+
+    const availableWidth = Math.max(containerSize.width - 32, 100);
+    const availableHeight = Math.max(containerSize.height - 32, 100);
+
+    if (zoomMode === "fit-page") {
+      return Math.min(availableWidth / pageBaseSize.width, availableHeight / pageBaseSize.height);
+    }
+
+    return availableWidth / pageBaseSize.width;
+  }, [
+    containerSize.height,
+    containerSize.width,
+    manualZoomPercent,
+    pageBaseSize.height,
+    pageBaseSize.width,
+    zoomMode,
+  ]);
+
+  const loadingMessage = useMemo(() => {
+    if (loadState === "idle") {
+      return t("viewer.loadPdfPrompt");
+    }
+    if (loadState === "loading") {
+      return t("viewer.loadingPdf");
+    }
+    if (loadState === "error") {
+      return t("viewer.unableToLoadPdf", { error: loadError });
+    }
+    return "";
+  }, [loadError, loadState, t]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function renderPage() {
+      if (!documentRef || !canvasRef.current) {
+        return;
+      }
+
+      const pageNumber = Math.min(Math.max(currentPageIndex + 1, 1), documentRef.numPages);
+      const page = await documentRef.getPage(pageNumber);
+      const viewport = page.getViewport({ scale: effectiveScale });
+      const canvas = canvasRef.current;
+      const context = canvas.getContext("2d");
+
+      if (!context) {
+        return;
+      }
+
+      canvas.width = Math.ceil(viewport.width);
+      canvas.height = Math.ceil(viewport.height);
+      canvas.style.transform = "none";
+      canvas.style.transformOrigin = "top left";
+      context.setTransform(1, 0, 0, 1, 0, 0);
+      context.clearRect(0, 0, canvas.width, canvas.height);
+
+      await page.render({
+        canvasContext: context,
+        viewport,
+      }).promise;
+
+      if (!cancelled) {
+        const anchor = pendingScrollAnchorRef.current;
+        if (anchor && viewerScrollRef.current) {
+          viewerScrollRef.current.scrollLeft = anchor.contentX * effectiveScale - anchor.clientX;
+          viewerScrollRef.current.scrollTop = anchor.contentY * effectiveScale - anchor.clientY;
+          pendingScrollAnchorRef.current = null;
+        }
+      }
+    }
+
+    void renderPage();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentPageIndex, documentRef, effectiveScale]);
+
+  function setManualZoom(percent: number, anchor?: ScrollAnchor) {
+    if (anchor) {
+      pendingScrollAnchorRef.current = anchor;
+    }
+    setZoomMode("manual");
+    setManualZoomPercent(clampZoom(percent));
+  }
+
+  function handleZoomChange(value: string) {
+    if (value === "fit-width" || value === "fit-page") {
+      pendingScrollAnchorRef.current = null;
+      setZoomMode(value);
+      return;
+    }
+
+    setManualZoom(Number(value));
+  }
+
+  function handleViewerWheel(event: WheelEvent<HTMLDivElement>) {
+    if (!event.ctrlKey) {
+      return;
+    }
+
+    event.preventDefault();
+    const container = viewerScrollRef.current;
+    if (!container) {
+      return;
+    }
+
+    const rect = container.getBoundingClientRect();
+    const currentPercent = Math.round(effectiveScale * 100);
+    const step = event.deltaY < 0 ? 10 : -10;
+    const nextPercent = clampZoom(currentPercent + step);
+    const anchor: ScrollAnchor = {
+      contentX: (container.scrollLeft + (event.clientX - rect.left)) / effectiveScale,
+      contentY: (container.scrollTop + (event.clientY - rect.top)) / effectiveScale,
+      clientX: event.clientX - rect.left,
+      clientY: event.clientY - rect.top,
+    };
+
+    setManualZoom(nextPercent, anchor);
+  }
+
+  return (
+    <section className="pane pane-viewer">
+      <div className="pane-toolbar viewer-toolbar">
+        <div className="action-row">
+          <button
+            className="secondary-button"
+            onClick={() => onPageIndexChange(Math.max(currentPageIndex - 1, 0))}
+            disabled={!documentRef || currentPageIndex <= 0}
+          >
+            {t("viewer.previous")}
+          </button>
+          <button
+            className="secondary-button"
+            onClick={() => onPageIndexChange(Math.min(currentPageIndex + 1, Math.max(pageCount - 1, 0)))}
+            disabled={!documentRef || currentPageIndex >= Math.max(pageCount - 1, 0)}
+          >
+            {t("viewer.next")}
+          </button>
+          <label className="inline-control">
+            <span>{t("viewer.jump")}</span>
+            <input
+              type="number"
+              min={1}
+              max={Math.max(pageCount, 1)}
+              value={Math.min(currentPageIndex + 1, Math.max(pageCount, 1))}
+              onChange={(event) =>
+                onPageIndexChange(
+                  Math.min(
+                    Math.max(Number(event.target.value || "1") - 1, 0),
+                    Math.max(pageCount - 1, 0),
+                  ),
+                )
+              }
+            />
+          </label>
+        </div>
+        <div className="action-row">
+          <button
+            className={`secondary-button ${zoomMode === "fit-width" ? "is-active" : ""}`}
+            onClick={() => handleZoomChange("fit-width")}
+          >
+            {t("viewer.fitWidth")}
+          </button>
+          <button
+            className={`secondary-button ${zoomMode === "fit-page" ? "is-active" : ""}`}
+            onClick={() => handleZoomChange("fit-page")}
+          >
+            {t("viewer.fitPage")}
+          </button>
+          <select
+            className="zoom-select"
+            value={zoomMode === "manual" ? String(manualZoomPercent) : zoomMode}
+            onChange={(event) => handleZoomChange(event.target.value)}
+          >
+            <option value="fit-width">{t("viewer.fitWidth")}</option>
+            <option value="fit-page">{t("viewer.fitPage")}</option>
+            {zoomOptions.map((percent) => (
+              <option key={percent} value={percent}>
+                {percent}%
+              </option>
+            ))}
+          </select>
+          <span className="viewer-meta">
+            {documentRef
+              ? t("viewer.pageCounter", { current: currentPageIndex + 1, total: pageCount })
+              : loadingMessage}
+          </span>
+          <span className="viewer-meta viewer-help">{t("viewer.zoomHelp")}</span>
+        </div>
+      </div>
+      <div ref={viewerScrollRef} className="viewer-surface" onWheel={handleViewerWheel}>
+        {documentRef ? (
+          <div className="pdf-stage">
+            <canvas ref={canvasRef} className="pdf-canvas" />
+          </div>
+        ) : (
+          <p>{loadingMessage}</p>
+        )}
+      </div>
+    </section>
+  );
+});
