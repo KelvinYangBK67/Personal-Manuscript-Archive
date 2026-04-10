@@ -8,7 +8,10 @@ import type {
   ImportAssetResult,
   ImportEntryPdfInput,
   ImportEntryPdfResult,
+  PageMutationInput,
+  PageMutationResult,
   PageRecord,
+  RemovePageInput,
   SearchMode,
   SearchResult,
 } from "../types";
@@ -68,4 +71,16 @@ export async function importAsset(rootPath: string, input: ImportAssetInput): Pr
 
 export async function deleteAsset(rootPath: string, assetId: string): Promise<ArchiveSnapshot> {
   return invoke("delete_asset", { rootPath, assetId });
+}
+
+export async function movePage(rootPath: string, input: PageMutationInput): Promise<PageMutationResult> {
+  return invoke("move_page", { rootPath, input });
+}
+
+export async function copyPage(rootPath: string, input: PageMutationInput): Promise<PageMutationResult> {
+  return invoke("copy_page", { rootPath, input });
+}
+
+export async function removePage(rootPath: string, input: RemovePageInput): Promise<PageMutationResult> {
+  return invoke("remove_page", { rootPath, input });
 }

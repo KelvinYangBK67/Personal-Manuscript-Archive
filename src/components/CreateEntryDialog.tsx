@@ -1,5 +1,4 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { open } from "@tauri-apps/plugin-dialog";
 import type { CreateEntryInput } from "../types";
 import {
   buildYearOptions,
@@ -27,7 +26,6 @@ interface FormState {
   date_note: string;
   description: string;
   notes: string;
-  canonical_pdf_source: string;
 }
 
 const emptyForm: FormState = {
@@ -39,7 +37,6 @@ const emptyForm: FormState = {
   date_note: "",
   description: "",
   notes: "",
-  canonical_pdf_source: "",
 };
 
 function toOptionalNumber(value: string): number | null {
@@ -67,10 +64,7 @@ export function CreateEntryDialog(props: CreateEntryDialogProps) {
   }, [form.date_month]);
   const dayOptions = useMemo(() => getValidDayOptions(selectedYear, selectedMonth), [selectedMonth, selectedYear]);
 
-  const canSubmit = useMemo(
-    () => form.title.trim().length > 0 && form.canonical_pdf_source.trim().length > 0,
-    [form.canonical_pdf_source, form.title],
-  );
+  const canSubmit = useMemo(() => form.title.trim().length > 0, [form.title]);
 
   useEffect(() => {
     if (selectedMonth == null) {
@@ -89,19 +83,6 @@ export function CreateEntryDialog(props: CreateEntryDialogProps) {
     return null;
   }
 
-  async function handleChoosePdf() {
-    const selected = await open({
-      directory: false,
-      multiple: false,
-      filters: [{ name: "PDF", extensions: ["pdf"] }],
-      title: t("field.canonicalPdf"),
-    });
-
-    if (typeof selected === "string") {
-      setForm((current) => ({ ...current, canonical_pdf_source: selected }));
-    }
-  }
-
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
 
@@ -118,7 +99,6 @@ export function CreateEntryDialog(props: CreateEntryDialogProps) {
       description: form.description,
       tags: splitCommaValues(tagsText),
       notes: form.notes,
-      canonical_pdf_source: form.canonical_pdf_source,
     };
 
     await onSubmit(payload);
@@ -132,7 +112,7 @@ export function CreateEntryDialog(props: CreateEntryDialogProps) {
         <div className="modal-header">
           <div>
             <p className="eyebrow">{t("dialog.newEntry")}</p>
-            <h2>{t("dialog.createImportPdf")}</h2>
+            <h2>{t("button.createEntry")}</h2>
           </div>
           <button className="ghost-button" onClick={onClose} disabled={creating}>
             {t("common.close")}
@@ -248,16 +228,6 @@ export function CreateEntryDialog(props: CreateEntryDialogProps) {
               value={form.notes}
               onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}
             />
-          </label>
-
-          <label className="form-grid-span-2">
-            <span>{t("field.canonicalPdf")}</span>
-            <div className="file-picker">
-              <input value={form.canonical_pdf_source} readOnly placeholder={t("placeholder.choosePdfFile")} />
-              <button type="button" className="secondary-button" onClick={handleChoosePdf}>
-                {t("button.choosePdf")}
-              </button>
-            </div>
           </label>
 
           <div className="modal-actions form-grid-span-2">

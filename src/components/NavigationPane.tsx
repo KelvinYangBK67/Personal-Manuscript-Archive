@@ -1,5 +1,12 @@
-import { useMemo } from "react";
-import type { EntryRecord, EntryWithPages, PageRecord, SearchMode, SearchResult } from "../types";
+import { useEffect, useMemo, useState, type DragEvent } from "react";
+import type {
+  EntryRecord,
+  EntryWithPages,
+  PageClipboardState,
+  PageRecord,
+  SearchMode,
+  SearchResult,
+} from "../types";
 import { compareEntriesByStructuredDate, comparePagesBySortOrder, formatPageLabel } from "../lib/utils";
 import { useI18n } from "../i18n/I18nProvider";
 import type { TranslationKey } from "../i18n/translations";
@@ -12,6 +19,7 @@ interface NavigationPaneProps {
   searchQuery: string;
   searchMode: SearchMode;
   searchResults: SearchResult[];
+  pageClipboard: PageClipboardState | null;
   onSearchQueryChange: (value: string) => void;
   onSearchModeChange: (value: SearchMode) => void;
   onSelectEntry: (entryId: string) => void;
@@ -20,6 +28,11 @@ interface NavigationPaneProps {
   onOpenCreateDialog: () => void;
   onDeleteEntry: () => Promise<void>;
   onRefresh: () => Promise<void>;
+  onMovePage: (pageId: string, targetEntryId: string, targetBeforePageId: string | null) => Promise<void>;
+  onCopyPage: (pageId: string) => void;
+  onCutPage: (pageId: string) => void;
+  onPasteIntoEntry: (entryId: string, targetBeforePageId: string | null) => Promise<void>;
+  onRemovePage: (pageId: string) => Promise<void>;
   searching: boolean;
 }
 
@@ -54,12 +67,19 @@ interface TreeTypeNode {
   unknownEntries: TreeEntryNode[];
 }
 
+interface ContextMenuState {
+  x: number;
+  y: number;
+  pageId?: string;
+  entryId?: string;
+}
+
 function getEntryTypeLabel(entry: EntryRecord): string {
   const value = entry.entry_type?.trim();
   return value || "Uncategorized";
 }
 
-function buildTreeNodeIds(entry: EntryRecord) {
+export function buildTreeNodeIds(entry: EntryRecord) {
   const typeLabel = getEntryTypeLabel(entry);
   const typeId = `type:${typeLabel}`;
   const yearKnown = entry.date_year !== null && entry.date_year_uncertain === 0;
@@ -98,6 +118,7 @@ export function NavigationPane(props: NavigationPaneProps) {
     searchQuery,
     searchMode,
     searchResults,
+    pageClipboard,
     onSearchQueryChange,
     onSearchModeChange,
     onSelectEntry,
@@ -106,11 +127,31 @@ export function NavigationPane(props: NavigationPaneProps) {
     onOpenCreateDialog,
     onDeleteEntry,
     onRefresh,
+    onMovePage,
+    onCopyPage,
+    onCutPage,
+    onPasteIntoEntry,
+    onRemovePage,
     searching,
   } = props;
 
   const expandedSet = useMemo(() => new Set(expandedNodeIds), [expandedNodeIds]);
   const showingResults = searchQuery.trim().length > 0;
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [dragTarget, setDragTarget] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!contextMenu) {
+      return;
+    }
+
+    function handleWindowClick() {
+      setContextMenu(null);
+    }
+
+    window.addEventListener("click", handleWindowClick);
+    return () => window.removeEventListener("click", handleWindowClick);
+  }, [contextMenu]);
 
   const tree = useMemo<TreeTypeNode[]>(() => {
     const grouped = new Map<string, TreeTypeNode>();
@@ -207,6 +248,79 @@ export function NavigationPane(props: NavigationPaneProps) {
     return fieldMap[field] ?? "result.matchedField.description";
   }
 
+  function handlePageDragStart(event: DragEvent<HTMLButtonElement>, pageId: string) {
+    event.dataTransfer.setData("application/x-page-id", pageId);
+    event.dataTransfer.effectAllowed = "move";
+  }
+
+  function readDraggedPageId(event: DragEvent<HTMLElement>): string | null {
+    return event.dataTransfer.getData("application/x-page-id") || null;
+  }
+
+  function handlePageDrop(event: DragEvent<HTMLElement>, targetEntryId: string, targetBeforePageId: string | null) {
+    event.preventDefault();
+    const pageId = readDraggedPageId(event);
+    setDragTarget(null);
+    if (!pageId || pageId === targetBeforePageId) {
+      return;
+    }
+    void onMovePage(pageId, targetEntryId, targetBeforePageId);
+  }
+
+  function renderContextMenu() {
+    if (!contextMenu) {
+      return null;
+    }
+
+    return (
+      <div className="tree-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }}>
+        {contextMenu.pageId ? (
+          <>
+            <button
+              className="tree-context-item"
+              onClick={() => {
+                onCutPage(contextMenu.pageId!);
+                setContextMenu(null);
+              }}
+            >
+              {t("pageAction.cut")}
+            </button>
+            <button
+              className="tree-context-item"
+              onClick={() => {
+                onCopyPage(contextMenu.pageId!);
+                setContextMenu(null);
+              }}
+            >
+              {t("pageAction.copy")}
+            </button>
+            <button
+              className="tree-context-item danger"
+              onClick={() => {
+                void onRemovePage(contextMenu.pageId!);
+                setContextMenu(null);
+              }}
+            >
+              {t("pageAction.remove")}
+            </button>
+          </>
+        ) : null}
+        {contextMenu.entryId ? (
+          <button
+            className="tree-context-item"
+            disabled={!pageClipboard}
+            onClick={() => {
+              void onPasteIntoEntry(contextMenu.entryId!, null);
+              setContextMenu(null);
+            }}
+          >
+            {t("pageAction.pasteIntoEntry")}
+          </button>
+        ) : null}
+      </div>
+    );
+  }
+
   function renderEntryNode(node: TreeEntryNode) {
     const expanded = expandedSet.has(node.id);
     return (
@@ -216,8 +330,22 @@ export function NavigationPane(props: NavigationPaneProps) {
             {expanded ? "▾" : "▸"}
           </button>
           <button
-            className={`tree-label-button tree-entry-label ${selectedEntryId === node.entry.entry.id ? "is-active" : ""}`}
+            className={`tree-label-button tree-entry-label ${selectedEntryId === node.entry.entry.id ? "is-active" : ""} ${
+              dragTarget === node.id ? "is-drop-target" : ""
+            }`}
             onClick={() => onSelectEntry(node.entry.entry.id)}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              setContextMenu({ x: event.clientX, y: event.clientY, entryId: node.entry.entry.id });
+            }}
+            onDragOver={(event) => {
+              if (readDraggedPageId(event)) {
+                event.preventDefault();
+                setDragTarget(node.id);
+              }
+            }}
+            onDragLeave={() => setDragTarget((current) => (current === node.id ? null : current))}
+            onDrop={(event) => handlePageDrop(event, node.entry.entry.id, null)}
           >
             {node.entry.entry.title}
           </button>
@@ -228,8 +356,24 @@ export function NavigationPane(props: NavigationPaneProps) {
               <div key={pageNode.id} className="tree-row tree-page-row">
                 <span className="tree-toggle-placeholder" />
                 <button
-                  className={`tree-label-button tree-page-label ${selectedPageId === pageNode.page.id ? "is-active" : ""}`}
+                  className={`tree-label-button tree-page-label ${selectedPageId === pageNode.page.id ? "is-active" : ""} ${
+                    dragTarget === pageNode.id ? "is-drop-target" : ""
+                  } ${pageClipboard?.page_id === pageNode.page.id ? "is-clipboard-source" : ""}`}
                   onClick={() => onSelectPage(pageNode.page)}
+                  draggable
+                  onDragStart={(event) => handlePageDragStart(event, pageNode.page.id)}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    setContextMenu({ x: event.clientX, y: event.clientY, pageId: pageNode.page.id });
+                  }}
+                  onDragOver={(event) => {
+                    if (readDraggedPageId(event)) {
+                      event.preventDefault();
+                      setDragTarget(pageNode.id);
+                    }
+                  }}
+                  onDragLeave={() => setDragTarget((current) => (current === pageNode.id ? null : current))}
+                  onDrop={(event) => handlePageDrop(event, node.entry.entry.id, pageNode.page.id)}
                 >
                   {formatPageLabel(
                     pageNode.page.page_number,
@@ -324,7 +468,6 @@ export function NavigationPane(props: NavigationPaneProps) {
                       {typeNode.label}
                     </button>
                   </div>
-
                   {typeExpanded ? (
                     <div className="tree-children">
                       {typeNode.years.map((yearNode) => {
@@ -332,7 +475,11 @@ export function NavigationPane(props: NavigationPaneProps) {
                         return (
                           <div key={yearNode.id} className="tree-node tree-year-node">
                             <div className="tree-row">
-                              <button className="tree-toggle-button" onClick={() => onToggleNode(yearNode.id)} aria-label="toggle">
+                              <button
+                                className="tree-toggle-button"
+                                onClick={() => onToggleNode(yearNode.id)}
+                                aria-label="toggle"
+                              >
                                 {yearExpanded ? "▾" : "▸"}
                               </button>
                               <button className="tree-label-button tree-year-label" onClick={() => onToggleNode(yearNode.id)}>
@@ -341,36 +488,61 @@ export function NavigationPane(props: NavigationPaneProps) {
                             </div>
                             {yearExpanded ? (
                               <div className="tree-children">
+                                {yearNode.directEntries.map((entryNode) => renderEntryNode(entryNode))}
                                 {yearNode.months.map((monthNode) => {
                                   const monthExpanded = expandedSet.has(monthNode.id);
                                   return (
                                     <div key={monthNode.id} className="tree-node tree-month-node">
                                       <div className="tree-row">
-                                        <button className="tree-toggle-button" onClick={() => onToggleNode(monthNode.id)} aria-label="toggle">
+                                        <button
+                                          className="tree-toggle-button"
+                                          onClick={() => onToggleNode(monthNode.id)}
+                                          aria-label="toggle"
+                                        >
                                           {monthExpanded ? "▾" : "▸"}
                                         </button>
-                                        <button className="tree-label-button tree-month-label" onClick={() => onToggleNode(monthNode.id)}>
+                                        <button
+                                          className="tree-label-button tree-month-label"
+                                          onClick={() => onToggleNode(monthNode.id)}
+                                        >
                                           {monthNode.label}
                                         </button>
                                       </div>
-                                      {monthExpanded ? <div className="tree-children">{monthNode.entries.map(renderEntryNode)}</div> : null}
+                                      {monthExpanded ? (
+                                        <div className="tree-children">
+                                          {monthNode.entries.map((entryNode) => renderEntryNode(entryNode))}
+                                        </div>
+                                      ) : null}
                                     </div>
                                   );
                                 })}
-                                {yearNode.directEntries.map(renderEntryNode)}
                               </div>
                             ) : null}
                           </div>
                         );
                       })}
-
                       {typeNode.unknownEntries.length > 0 ? (
-                        <div className="tree-node tree-year-node">
+                        <div className="tree-node tree-unknown-node">
                           <div className="tree-row">
-                            <span className="tree-toggle-placeholder" />
-                            <div className="tree-label-button tree-year-label is-static">{t("nav.timeUnknown")}</div>
+                            <button
+                              className="tree-toggle-button"
+                              onClick={() => onToggleNode(`${typeNode.id}:unknown`)}
+                              aria-label="toggle"
+                            >
+                              {expandedSet.has(`${typeNode.id}:unknown`) ? "▾" : "▸"}
+                            </button>
+                            <button
+                              className="tree-label-button tree-unknown-label"
+                              onClick={() => onToggleNode(`${typeNode.id}:unknown`)}
+                            >
+                              {t("nav.timeUnknown")}
+                            </button>
                           </div>
-                          <div className="tree-children">{typeNode.unknownEntries.map(renderEntryNode)}</div>
+                          {expandedSet.has(`${typeNode.id}:unknown`) ? (
+                            <div className="tree-children">
+                              {typeNode.unknownEntries.map((entryNode) => renderEntryNode(entryNode))}
+                            </div>
+                          ) : null}
                         </div>
                       ) : null}
                     </div>
@@ -380,13 +552,10 @@ export function NavigationPane(props: NavigationPaneProps) {
             })}
           </div>
         ) : (
-          <div className="editor-empty">
-            <p>{t("nav.empty")}</p>
-          </div>
+          <div className="hint-text">{t("nav.empty")}</div>
         )}
       </div>
+      {renderContextMenu()}
     </aside>
   );
 }
-
-export { buildTreeNodeIds };

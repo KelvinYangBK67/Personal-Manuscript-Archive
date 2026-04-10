@@ -104,7 +104,6 @@ pub struct CreateEntryInput {
     pub description: String,
     pub tags: Vec<String>,
     pub notes: String,
-    pub canonical_pdf_source: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -132,6 +131,25 @@ pub struct ImportAssetInput {
 pub struct ImportAssetResult {
     pub snapshot: ArchiveSnapshot,
     pub extraction_status: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PageMutationInput {
+    pub page_id: String,
+    pub target_entry_id: String,
+    pub target_before_page_id: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RemovePageInput {
+    pub page_id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PageMutationResult {
+    pub snapshot: ArchiveSnapshot,
+    pub selected_entry_id: Option<String>,
+    pub selected_page_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -362,6 +380,61 @@ fn relative_resource_path(asset_id: &str, extension: Option<&str>) -> String {
         Some(ext) => format!("assets/resources/{asset_id}.{ext}"),
         None => format!("assets/resources/{asset_id}"),
     }
+}
+
+fn entry_exists(transaction: &Transaction<'_>, entry_id: &str) -> ArchiveResult<bool> {
+    transaction
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM entries WHERE id = ?1)",
+            params![entry_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|value| value == 1)
+        .map_err(ArchiveError::from)
+}
+
+fn load_page_ids_for_entry(transaction: &Transaction<'_>, entry_id: &str) -> ArchiveResult<Vec<String>> {
+    let mut statement = transaction.prepare(
+        "
+        SELECT id
+        FROM pages
+        WHERE entry_id = ?1
+        ORDER BY sort_order ASC, id ASC
+        ",
+    )?;
+
+    let rows = statement.query_map(params![entry_id], |row| row.get::<_, String>(0))?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(ArchiveError::from)
+}
+
+fn apply_page_order(transaction: &Transaction<'_>, entry_id: &str, page_ids: &[String], now: &str) -> ArchiveResult<()> {
+    for (index, page_id) in page_ids.iter().enumerate() {
+        transaction.execute(
+            "
+            UPDATE pages
+            SET entry_id = ?2, sort_order = ?3, updated_at = ?4
+            WHERE id = ?1
+            ",
+            params![page_id.as_str(), entry_id, index as i64 + 1, now],
+        )?;
+    }
+
+    transaction.execute(
+        "
+        UPDATE entries
+        SET page_count = ?2, updated_at = ?3
+        WHERE id = ?1
+        ",
+        params![entry_id, page_ids.len() as i64, now],
+    )?;
+
+    Ok(())
+}
+
+fn resolve_insert_index(page_ids: &[String], target_before_page_id: Option<&str>) -> usize {
+    target_before_page_id
+        .and_then(|before_id| page_ids.iter().position(|id| id == before_id))
+        .unwrap_or(page_ids.len())
 }
 
 fn absolute_asset_path(root: &Path, relative: &str) -> PathBuf {
@@ -829,29 +902,11 @@ pub fn delete_asset(root_path: String, asset_id: String) -> Result<ArchiveSnapsh
 #[tauri::command]
 pub fn create_entry(root_path: String, input: CreateEntryInput) -> Result<CreateEntryResult, String> {
     let root = normalize_root(&root_path).map_err(to_tauri_error)?;
-    let source_path = PathBuf::from(input.canonical_pdf_source.trim());
-    if !source_path.exists() {
-        return Err("The selected PDF file does not exist.".into());
-    }
-
     let mut connection = connection_for_root(&root).map_err(to_tauri_error)?;
     let transaction = connection.transaction().map_err(to_tauri_error)?;
     let entry_id = next_id(&transaction, "entry", "E").map_err(to_tauri_error)?;
-    let asset_id = next_id(&transaction, "asset", "A").map_err(to_tauri_error)?;
-    let page_count = read_pdf_page_count(&source_path).map_err(to_tauri_error)? as i64;
-    let relative_pdf = relative_source_pdf_path(&asset_id);
-    let destination_path = absolute_asset_path(&root, &relative_pdf);
-    if let Some(parent) = destination_path.parent() {
-        fs::create_dir_all(parent).map_err(to_tauri_error)?;
-    }
-    fs::copy(&source_path, &destination_path).map_err(to_tauri_error)?;
-
     let now = now_iso();
     let tags_json = serde_json::to_string(&input.tags).map_err(|error| error.to_string())?;
-    let file_label = source_path
-        .file_name()
-        .and_then(|value| value.to_str())
-        .map(|value| value.to_string());
     transaction
         .execute(
             "
@@ -874,69 +929,20 @@ pub fn create_entry(root_path: String, input: CreateEntryInput) -> Result<Create
                 clean_optional(&input.date_note),
                 clean_optional(&input.description),
                 tags_json,
-                page_count,
+                0,
                 clean_optional(&input.notes),
                 now.as_str(),
                 now.as_str()
             ],
         )
         .map_err(to_tauri_error)?;
-    transaction
-        .execute(
-            "
-            INSERT INTO assets (
-              id, entry_id, asset_type, file_path, label, notes, created_at, updated_at
-            ) VALUES (?1, ?2, 'pdf', ?3, ?4, NULL, ?5, ?6)
-            ",
-            params![
-                asset_id.as_str(),
-                entry_id.as_str(),
-                relative_pdf.as_str(),
-                file_label,
-                now.as_str(),
-                now.as_str()
-            ],
-        )
-        .map_err(to_tauri_error)?;
-
-    let mut first_page_id: Option<String> = None;
-    for pdf_page_index in 0..page_count {
-        let page_id = next_id(&transaction, "page", "P").map_err(to_tauri_error)?;
-        if first_page_id.is_none() {
-            first_page_id = Some(page_id.clone());
-        }
-        transaction
-            .execute(
-                "
-                INSERT INTO pages (
-                  id, entry_id, page_number, page_label, sort_order, source_asset_id,
-                  source_pdf_path, source_pdf_page_index, original_page_number,
-                  transcription_text, summary, keywords_json, page_notes,
-                  created_at, updated_at
-                ) VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?6, ?7, ?8, NULL, NULL, '[]', NULL, ?9, ?10)
-                ",
-                params![
-                    page_id.as_str(),
-                    entry_id.as_str(),
-                    pdf_page_index + 1,
-                    pdf_page_index + 1,
-                    asset_id.as_str(),
-                    relative_pdf.as_str(),
-                    pdf_page_index,
-                    pdf_page_index + 1,
-                    now.as_str(),
-                    now.as_str()
-                ],
-            )
-            .map_err(to_tauri_error)?;
-    }
 
     transaction.commit().map_err(to_tauri_error)?;
     let snapshot = load_snapshot_internal(&root).map_err(to_tauri_error)?;
     Ok(CreateEntryResult {
         snapshot,
         selected_entry_id: entry_id,
-        selected_page_id: first_page_id,
+        selected_page_id: None,
     })
 }
 
@@ -1040,6 +1046,184 @@ pub fn import_entry_pdf(root_path: String, input: ImportEntryPdfInput) -> Result
         snapshot,
         selected_entry_id: input.entry_id,
         selected_page_id: first_page_id,
+    })
+}
+
+#[tauri::command]
+pub fn move_page(root_path: String, input: PageMutationInput) -> Result<PageMutationResult, String> {
+    let root = normalize_root(&root_path).map_err(to_tauri_error)?;
+    let mut connection = connection_for_root(&root).map_err(to_tauri_error)?;
+    let transaction = connection.transaction().map_err(to_tauri_error)?;
+
+    if !entry_exists(&transaction, input.target_entry_id.as_str()).map_err(to_tauri_error)? {
+        return Err("The target entry does not exist.".into());
+    }
+
+    let source_entry_id: String = transaction
+        .query_row(
+            "SELECT entry_id FROM pages WHERE id = ?1",
+            params![input.page_id.as_str()],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(to_tauri_error)?
+        .ok_or_else(|| "The selected page does not exist.".to_string())?;
+
+    let now = now_iso();
+    if source_entry_id == input.target_entry_id {
+        let mut page_ids = load_page_ids_for_entry(&transaction, source_entry_id.as_str()).map_err(to_tauri_error)?;
+        page_ids.retain(|page_id| page_id != &input.page_id);
+        let insert_index = resolve_insert_index(&page_ids, input.target_before_page_id.as_deref());
+        page_ids.insert(insert_index, input.page_id.clone());
+        apply_page_order(&transaction, source_entry_id.as_str(), &page_ids, now.as_str()).map_err(to_tauri_error)?;
+    } else {
+        let mut source_page_ids =
+            load_page_ids_for_entry(&transaction, source_entry_id.as_str()).map_err(to_tauri_error)?;
+        source_page_ids.retain(|page_id| page_id != &input.page_id);
+
+        let mut target_page_ids =
+            load_page_ids_for_entry(&transaction, input.target_entry_id.as_str()).map_err(to_tauri_error)?;
+        let insert_index = resolve_insert_index(&target_page_ids, input.target_before_page_id.as_deref());
+        target_page_ids.insert(insert_index, input.page_id.clone());
+
+        apply_page_order(&transaction, source_entry_id.as_str(), &source_page_ids, now.as_str()).map_err(to_tauri_error)?;
+        apply_page_order(&transaction, input.target_entry_id.as_str(), &target_page_ids, now.as_str())
+            .map_err(to_tauri_error)?;
+    }
+
+    transaction.commit().map_err(to_tauri_error)?;
+    let snapshot = load_snapshot_internal(&root).map_err(to_tauri_error)?;
+    Ok(PageMutationResult {
+        snapshot,
+        selected_entry_id: Some(input.target_entry_id),
+        selected_page_id: Some(input.page_id),
+    })
+}
+
+#[tauri::command]
+pub fn copy_page(root_path: String, input: PageMutationInput) -> Result<PageMutationResult, String> {
+    let root = normalize_root(&root_path).map_err(to_tauri_error)?;
+    let mut connection = connection_for_root(&root).map_err(to_tauri_error)?;
+    let transaction = connection.transaction().map_err(to_tauri_error)?;
+
+    if !entry_exists(&transaction, input.target_entry_id.as_str()).map_err(to_tauri_error)? {
+        return Err("The target entry does not exist.".into());
+    }
+
+    let source_page: PageRecord = transaction
+        .query_row(
+            "
+            SELECT
+              id, entry_id, page_number, page_label, sort_order, source_asset_id,
+              source_pdf_path, source_pdf_page_index, original_page_number, transcription_text,
+              summary, keywords_json, page_notes, created_at, updated_at
+            FROM pages
+            WHERE id = ?1
+            ",
+            params![input.page_id.as_str()],
+            |row| {
+                Ok(PageRecord {
+                    id: row.get(0)?,
+                    entry_id: row.get(1)?,
+                    page_number: row.get(2)?,
+                    page_label: row.get(3)?,
+                    sort_order: row.get(4)?,
+                    source_asset_id: row.get(5)?,
+                    source_pdf_path: row.get(6)?,
+                    source_pdf_page_index: row.get(7)?,
+                    original_page_number: row.get(8)?,
+                    transcription_text: row.get(9)?,
+                    summary: row.get(10)?,
+                    keywords_json: row.get(11)?,
+                    page_notes: row.get(12)?,
+                    created_at: row.get(13)?,
+                    updated_at: row.get(14)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(to_tauri_error)?
+        .ok_or_else(|| "The selected page does not exist.".to_string())?;
+
+    let page_id = next_id(&transaction, "page", "P").map_err(to_tauri_error)?;
+    let now = now_iso();
+    transaction
+        .execute(
+            "
+            INSERT INTO pages (
+              id, entry_id, page_number, page_label, sort_order, source_asset_id,
+              source_pdf_path, source_pdf_page_index, original_page_number,
+              transcription_text, summary, keywords_json, page_notes, created_at, updated_at
+            ) VALUES (?1, ?2, ?3, ?4, 0, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+            ",
+            params![
+                page_id.as_str(),
+                input.target_entry_id.as_str(),
+                source_page.page_number,
+                source_page.page_label.as_deref(),
+                source_page.source_asset_id.as_deref(),
+                source_page.source_pdf_path.as_deref(),
+                source_page.source_pdf_page_index,
+                source_page.original_page_number,
+                source_page.transcription_text.as_deref(),
+                source_page.summary.as_deref(),
+                source_page.keywords_json.as_deref(),
+                source_page.page_notes.as_deref(),
+                now.as_str(),
+                now.as_str()
+            ],
+        )
+        .map_err(to_tauri_error)?;
+
+    let mut target_page_ids =
+        load_page_ids_for_entry(&transaction, input.target_entry_id.as_str()).map_err(to_tauri_error)?;
+    let insert_index = resolve_insert_index(&target_page_ids, input.target_before_page_id.as_deref());
+    target_page_ids.insert(insert_index, page_id.clone());
+    apply_page_order(&transaction, input.target_entry_id.as_str(), &target_page_ids, now.as_str())
+        .map_err(to_tauri_error)?;
+
+    transaction.commit().map_err(to_tauri_error)?;
+    let snapshot = load_snapshot_internal(&root).map_err(to_tauri_error)?;
+    Ok(PageMutationResult {
+        snapshot,
+        selected_entry_id: Some(input.target_entry_id),
+        selected_page_id: Some(page_id),
+    })
+}
+
+#[tauri::command]
+pub fn remove_page(root_path: String, input: RemovePageInput) -> Result<PageMutationResult, String> {
+    let root = normalize_root(&root_path).map_err(to_tauri_error)?;
+    let mut connection = connection_for_root(&root).map_err(to_tauri_error)?;
+    let transaction = connection.transaction().map_err(to_tauri_error)?;
+
+    let source_entry_id: String = transaction
+        .query_row(
+            "SELECT entry_id FROM pages WHERE id = ?1",
+            params![input.page_id.as_str()],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(to_tauri_error)?
+        .ok_or_else(|| "The selected page does not exist.".to_string())?;
+
+    transaction
+        .execute("DELETE FROM pages WHERE id = ?1", params![input.page_id.as_str()])
+        .map_err(to_tauri_error)?;
+
+    let now = now_iso();
+    let remaining_page_ids =
+        load_page_ids_for_entry(&transaction, source_entry_id.as_str()).map_err(to_tauri_error)?;
+    apply_page_order(&transaction, source_entry_id.as_str(), &remaining_page_ids, now.as_str())
+        .map_err(to_tauri_error)?;
+
+    transaction.commit().map_err(to_tauri_error)?;
+    let selected_page_id = remaining_page_ids.first().cloned();
+    let snapshot = load_snapshot_internal(&root).map_err(to_tauri_error)?;
+    Ok(PageMutationResult {
+        snapshot,
+        selected_entry_id: Some(source_entry_id),
+        selected_page_id,
     })
 }
 

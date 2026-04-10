@@ -6,11 +6,13 @@ import type {
   EntryRecord,
   EntryWithPages,
   ImportAssetInput,
+  PageClipboardState,
   PageRecord,
   SearchMode,
   SearchResult,
 } from "./types";
 import {
+  copyPage,
   createEntry,
   deleteAsset,
   deleteEntry,
@@ -19,6 +21,8 @@ import {
   initArchiveRoot,
   loadBinaryAsset,
   loadArchive,
+  movePage,
+  removePage,
   searchArchive,
   updateEntry,
   updatePage,
@@ -79,6 +83,7 @@ export default function App() {
   const [pdfData, setPdfData] = useState<Uint8Array | null>(null);
   const [importingResource, setImportingResource] = useState(false);
   const [pendingResourceImport, setPendingResourceImport] = useState<PendingResourceImport | null>(null);
+  const [pageClipboard, setPageClipboard] = useState<PageClipboardState | null>(null);
   const pageIndexLookupRef = useRef<Map<number, string>>(new Map());
 
   useEffect(() => {
@@ -136,6 +141,13 @@ export default function App() {
     } finally {
       setLoading(false);
     }
+  }
+
+  function findEntryBundle(entries: EntryWithPages[], entryId: string | null): EntryWithPages | null {
+    if (!entryId) {
+      return null;
+    }
+    return entries.find((item) => item.entry.id === entryId) ?? null;
   }
 
   async function handleCreateEntry(input: CreateEntryInput) {
@@ -377,6 +389,78 @@ export default function App() {
     }
   }
 
+  async function handleMovePage(pageId: string, targetEntryId: string, targetBeforePageId: string | null) {
+    if (!archiveRoot) {
+      return;
+    }
+    try {
+      const result = await movePage(archiveRoot, {
+        page_id: pageId,
+        target_entry_id: targetEntryId,
+        target_before_page_id: targetBeforePageId,
+      });
+      const selectedBundle = findEntryBundle(result.snapshot.entries, result.selected_entry_id);
+      setSnapshot(result.snapshot);
+      setSelectedEntryId(result.selected_entry_id);
+      setSelectedPageId(result.selected_page_id);
+      ensureExpandedForEntry(selectedBundle);
+      if (pageClipboard?.mode === "cut" && pageClipboard.page_id === pageId) {
+        setPageClipboard(null);
+      }
+    } catch (error) {
+      setErrorMessage(String(error));
+    }
+  }
+
+  async function handlePasteIntoEntry(entryId: string, targetBeforePageId: string | null) {
+    if (!archiveRoot || !pageClipboard) {
+      return;
+    }
+    try {
+      const result =
+        pageClipboard.mode === "cut"
+          ? await movePage(archiveRoot, {
+              page_id: pageClipboard.page_id,
+              target_entry_id: entryId,
+              target_before_page_id: targetBeforePageId,
+            })
+          : await copyPage(archiveRoot, {
+              page_id: pageClipboard.page_id,
+              target_entry_id: entryId,
+              target_before_page_id: targetBeforePageId,
+            });
+      const selectedBundle = findEntryBundle(result.snapshot.entries, result.selected_entry_id);
+      setSnapshot(result.snapshot);
+      setSelectedEntryId(result.selected_entry_id);
+      setSelectedPageId(result.selected_page_id);
+      ensureExpandedForEntry(selectedBundle);
+      if (pageClipboard.mode === "cut") {
+        setPageClipboard(null);
+      }
+    } catch (error) {
+      setErrorMessage(String(error));
+    }
+  }
+
+  async function handleRemovePage(pageId: string) {
+    if (!archiveRoot || !window.confirm(t("confirm.removePage"))) {
+      return;
+    }
+    try {
+      const result = await removePage(archiveRoot, { page_id: pageId });
+      const selectedBundle = findEntryBundle(result.snapshot.entries, result.selected_entry_id);
+      setSnapshot(result.snapshot);
+      setSelectedEntryId(result.selected_entry_id);
+      setSelectedPageId(result.selected_page_id);
+      ensureExpandedForEntry(selectedBundle);
+      if (pageClipboard?.page_id === pageId) {
+        setPageClipboard(null);
+      }
+    } catch (error) {
+      setErrorMessage(String(error));
+    }
+  }
+
   function ensureExpandedForEntry(entryBundle: EntryWithPages | null) {
     if (!entryBundle) {
       return;
@@ -426,6 +510,7 @@ export default function App() {
           searchQuery={searchQuery}
           searchMode={searchMode}
           searchResults={searchResults}
+          pageClipboard={pageClipboard}
           onSearchQueryChange={setSearchQuery}
           onSearchModeChange={setSearchMode}
           onSelectEntry={(entryId) => {
@@ -449,6 +534,11 @@ export default function App() {
           onOpenCreateDialog={() => setCreateDialogOpen(true)}
           onDeleteEntry={handleDeleteEntry}
           onRefresh={refreshArchive}
+          onMovePage={handleMovePage}
+          onCopyPage={(pageId) => setPageClipboard({ mode: "copy", page_id: pageId })}
+          onCutPage={(pageId) => setPageClipboard({ mode: "cut", page_id: pageId })}
+          onPasteIntoEntry={handlePasteIntoEntry}
+          onRemovePage={handleRemovePage}
           searching={searching}
         />
 

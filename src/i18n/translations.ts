@@ -84,6 +84,10 @@ export type TranslationKey =
   | "button.deleteResource"
   | "button.importPdfPages"
   | "button.importing"
+  | "pageAction.cut"
+  | "pageAction.copy"
+  | "pageAction.pasteIntoEntry"
+  | "pageAction.remove"
   | "prompt.importExtract"
   | "prompt.transcriptionExists"
   | "option.saveResourceOnly"
@@ -106,6 +110,7 @@ export type TranslationKey =
   | "option.uncertain"
   | "option.notSet"
   | "confirm.deleteEntry"
+  | "confirm.removePage"
   | "result.matchedField.title"
   | "result.matchedField.description"
   | "result.matchedField.entry_type"
@@ -203,6 +208,10 @@ export const translations: Record<Locale, Record<TranslationKey, TranslationValu
     "button.deleteResource": "刪除資源",
     "button.importPdfPages": "匯入 PDF 頁面",
     "button.importing": "處理中...",
+    "pageAction.cut": "剪下頁面",
+    "pageAction.copy": "複製頁面",
+    "pageAction.pasteIntoEntry": "貼到此條目",
+    "pageAction.remove": "從條目中移除頁面",
     "prompt.importExtract": "匯入時是否自動抽取為轉寫",
     "prompt.transcriptionExists": "轉寫已存在，請選擇如何處理",
     "option.saveResourceOnly": "僅作為資源保存",
@@ -226,6 +235,7 @@ export const translations: Record<Locale, Record<TranslationKey, TranslationValu
     "option.uncertain": "不確定",
     "option.notSet": "未設定",
     "confirm.deleteEntry": "要刪除此條目並將其受管檔案移到史料庫 trash/ 嗎？",
+    "confirm.removePage": "要把這一頁從條目中移除嗎？",
     "result.matchedField.title": "標題",
     "result.matchedField.description": "描述",
     "result.matchedField.entry_type": "條目類型",
@@ -320,6 +330,10 @@ export const translations: Record<Locale, Record<TranslationKey, TranslationValu
     "button.deleteResource": "Delete Resource",
     "button.importPdfPages": "Import PDF Pages",
     "button.importing": "Working...",
+    "pageAction.cut": "Cut Page",
+    "pageAction.copy": "Copy Page",
+    "pageAction.pasteIntoEntry": "Paste Into This Entry",
+    "pageAction.remove": "Remove Page From Entry",
     "prompt.importExtract": "Extract as transcription automatically during import?",
     "prompt.transcriptionExists": "A transcription already exists. Please choose how to proceed",
     "option.saveResourceOnly": "Save as resource only",
@@ -343,6 +357,7 @@ export const translations: Record<Locale, Record<TranslationKey, TranslationValu
     "option.uncertain": "Uncertain",
     "option.notSet": "Not set",
     "confirm.deleteEntry": "Delete this entry and move its managed files into trash/?",
+    "confirm.removePage": "Remove this page from its entry?",
     "result.matchedField.title": "Title",
     "result.matchedField.description": "Description",
     "result.matchedField.entry_type": "Entry Type",
@@ -437,6 +452,10 @@ export const translations: Record<Locale, Record<TranslationKey, TranslationValu
     "button.deleteResource": "Ressource löschen",
     "button.importPdfPages": "PDF-Seiten importieren",
     "button.importing": "Wird verarbeitet...",
+    "pageAction.cut": "Seite ausschneiden",
+    "pageAction.copy": "Seite kopieren",
+    "pageAction.pasteIntoEntry": "In diesen Eintrag einfügen",
+    "pageAction.remove": "Seite aus dem Eintrag entfernen",
     "prompt.importExtract": "Klartext beim Import automatisch als Transkription übernehmen?",
     "prompt.transcriptionExists": "Es ist bereits eine Transkription vorhanden. Bitte wähle aus, wie fortgefahren werden soll",
     "option.saveResourceOnly": "Nur als Ressource speichern",
@@ -460,6 +479,7 @@ export const translations: Record<Locale, Record<TranslationKey, TranslationValu
     "option.uncertain": "Unsicher",
     "option.notSet": "Nicht gesetzt",
     "confirm.deleteEntry": "Diesen Eintrag löschen und seine verwalteten Dateien nach trash/ verschieben?",
+    "confirm.removePage": "Diese Seite aus dem Eintrag entfernen?",
     "result.matchedField.title": "Titel",
     "result.matchedField.description": "Beschreibung",
     "result.matchedField.entry_type": "Eintragstyp",

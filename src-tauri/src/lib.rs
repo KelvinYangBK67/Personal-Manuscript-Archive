@@ -1,8 +1,9 @@
 mod archive;
 
 use archive::{
-    create_entry, delete_asset, delete_entry, import_asset, import_entry_pdf, init_archive_root,
-    load_archive, load_binary_asset, search_archive, update_entry, update_page,
+    copy_page, create_entry, delete_asset, delete_entry, import_asset, import_entry_pdf,
+    init_archive_root, load_archive, load_binary_asset, move_page, remove_page, search_archive,
+    update_entry, update_page,
 };
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -17,6 +18,9 @@ pub fn run() {
             import_entry_pdf,
             delete_asset,
             create_entry,
+            move_page,
+            copy_page,
+            remove_page,
             update_entry,
             update_page,
             search_archive,

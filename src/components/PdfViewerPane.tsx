@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState, type WheelEvent } from "react";
-import { getDocument, GlobalWorkerOptions, type PDFDocumentProxy } from "pdfjs-dist";
+import { getDocument, GlobalWorkerOptions, type PDFDocumentProxy, type RenderTask } from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { useI18n } from "../i18n/I18nProvider";
 
@@ -41,6 +41,8 @@ export const PdfViewerPane = memo(function PdfViewerPane(props: PdfViewerPanePro
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const viewerScrollRef = useRef<HTMLDivElement | null>(null);
   const pendingScrollAnchorRef = useRef<ScrollAnchor | null>(null);
+  const renderTaskRef = useRef<RenderTask | null>(null);
+  const renderSequenceRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -108,7 +110,7 @@ export const PdfViewerPane = memo(function PdfViewerPane(props: PdfViewerPanePro
 
       const pageNumber = Math.min(Math.max(currentPageIndex + 1, 1), documentRef.numPages);
       const page = await documentRef.getPage(pageNumber);
-      const viewport = page.getViewport({ scale: 1 });
+      const viewport = page.getViewport({ scale: 1, rotation: page.rotate });
 
       if (!cancelled) {
         setPageBaseSize({
@@ -166,6 +168,8 @@ export const PdfViewerPane = memo(function PdfViewerPane(props: PdfViewerPanePro
 
   useEffect(() => {
     let cancelled = false;
+    const renderSequence = renderSequenceRef.current + 1;
+    renderSequenceRef.current = renderSequence;
 
     async function renderPage() {
       if (!documentRef || !canvasRef.current) {
@@ -174,7 +178,7 @@ export const PdfViewerPane = memo(function PdfViewerPane(props: PdfViewerPanePro
 
       const pageNumber = Math.min(Math.max(currentPageIndex + 1, 1), documentRef.numPages);
       const page = await documentRef.getPage(pageNumber);
-      const viewport = page.getViewport({ scale: effectiveScale });
+      const viewport = page.getViewport({ scale: effectiveScale, rotation: page.rotate });
       const canvas = canvasRef.current;
       const context = canvas.getContext("2d");
 
@@ -189,12 +193,23 @@ export const PdfViewerPane = memo(function PdfViewerPane(props: PdfViewerPanePro
       context.setTransform(1, 0, 0, 1, 0, 0);
       context.clearRect(0, 0, canvas.width, canvas.height);
 
-      await page.render({
+      renderTaskRef.current?.cancel();
+      const renderTask = page.render({
         canvasContext: context,
         viewport,
-      }).promise;
+      });
+      renderTaskRef.current = renderTask;
 
-      if (!cancelled) {
+      try {
+        await renderTask.promise;
+      } catch (error) {
+        if (String(error).includes("RenderingCancelledException")) {
+          return;
+        }
+        throw error;
+      }
+
+      if (!cancelled && renderSequenceRef.current === renderSequence) {
         const anchor = pendingScrollAnchorRef.current;
         if (anchor && viewerScrollRef.current) {
           viewerScrollRef.current.scrollLeft = anchor.contentX * effectiveScale - anchor.clientX;
@@ -208,6 +223,7 @@ export const PdfViewerPane = memo(function PdfViewerPane(props: PdfViewerPanePro
 
     return () => {
       cancelled = true;
+      renderTaskRef.current?.cancel();
     };
   }, [currentPageIndex, documentRef, effectiveScale]);
 

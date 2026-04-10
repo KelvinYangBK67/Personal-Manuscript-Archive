@@ -85,7 +85,6 @@ export interface CreateEntryInput {
   description: string;
   tags: string[];
   notes: string;
-  canonical_pdf_source: string;
 }
 
 export interface CreateEntryResult {
@@ -114,4 +113,25 @@ export interface ImportAssetInput {
 export interface ImportAssetResult {
   snapshot: ArchiveSnapshot;
   extraction_status: "none" | "success" | "failed" | "unsupported";
+}
+
+export interface PageMutationInput {
+  page_id: string;
+  target_entry_id: string;
+  target_before_page_id: string | null;
+}
+
+export interface RemovePageInput {
+  page_id: string;
+}
+
+export interface PageMutationResult {
+  snapshot: ArchiveSnapshot;
+  selected_entry_id: string | null;
+  selected_page_id: string | null;
+}
+
+export interface PageClipboardState {
+  mode: "cut" | "copy";
+  page_id: string;
 }
