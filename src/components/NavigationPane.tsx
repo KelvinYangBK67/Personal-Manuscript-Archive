@@ -354,14 +354,20 @@ export function NavigationPane(props: NavigationPaneProps) {
           <div className="tree-children">
             {node.pages.map((pageNode) => (
               <div key={pageNode.id} className="tree-row tree-page-row">
-                <span className="tree-toggle-placeholder" />
+                <button
+                  className="tree-drag-handle"
+                  draggable
+                  aria-label={t("pageAction.drag")}
+                  title={t("pageAction.drag")}
+                  onDragStart={(event) => handlePageDragStart(event, pageNode.page.id)}
+                >
+                  ≡
+                </button>
                 <button
                   className={`tree-label-button tree-page-label ${selectedPageId === pageNode.page.id ? "is-active" : ""} ${
                     dragTarget === pageNode.id ? "is-drop-target" : ""
                   } ${pageClipboard?.page_id === pageNode.page.id ? "is-clipboard-source" : ""}`}
                   onClick={() => onSelectPage(pageNode.page)}
-                  draggable
-                  onDragStart={(event) => handlePageDragStart(event, pageNode.page.id)}
                   onContextMenu={(event) => {
                     event.preventDefault();
                     setContextMenu({ x: event.clientX, y: event.clientY, pageId: pageNode.page.id });

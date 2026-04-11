@@ -86,10 +86,13 @@ export type TranslationKey =
   | "button.importing"
   | "pageAction.cut"
   | "pageAction.copy"
+  | "pageAction.drag"
   | "pageAction.pasteIntoEntry"
   | "pageAction.remove"
   | "prompt.importExtract"
   | "prompt.transcriptionExists"
+  | "prompt.pdfImportStart"
+  | "prompt.pdfImportEnd"
   | "option.saveResourceOnly"
   | "option.saveResourceAndExtract"
   | "option.replaceTranscription"
@@ -98,6 +101,7 @@ export type TranslationKey =
   | "notice.extractionSuccess"
   | "notice.extractionFailed"
   | "notice.extractionUnsupported"
+  | "notice.invalidPdfPageRange"
   | "hint.searchableTextOnly"
   | "hint.resourcesRole"
   | "resources.empty"
@@ -210,10 +214,13 @@ export const translations: Record<Locale, Record<TranslationKey, TranslationValu
     "button.importing": "處理中...",
     "pageAction.cut": "剪下頁面",
     "pageAction.copy": "複製頁面",
+    "pageAction.drag": "拖動頁面",
     "pageAction.pasteIntoEntry": "貼到此條目",
     "pageAction.remove": "從條目中移除頁面",
     "prompt.importExtract": "匯入時是否自動抽取為轉寫",
     "prompt.transcriptionExists": "轉寫已存在，請選擇如何處理",
+    "prompt.pdfImportStart": "起始頁，可留空表示從第一頁開始",
+    "prompt.pdfImportEnd": "結束頁，可留空表示匯入到最後一頁",
     "option.saveResourceOnly": "僅作為資源保存",
     "option.saveResourceAndExtract": "作為資源保存，並自動抽取純文本到轉寫",
     "option.replaceTranscription": "覆蓋現有轉寫",
@@ -222,6 +229,7 @@ export const translations: Record<Locale, Record<TranslationKey, TranslationValu
     "notice.extractionSuccess": "已成功抽取純文本",
     "notice.extractionFailed": "無法從該文件抽取純文本",
     "notice.extractionUnsupported": "此文件類型暫不支持自動抽取",
+    "notice.invalidPdfPageRange": "PDF 頁碼範圍無效，留空即可匯入全部頁面。",
     "hint.searchableTextOnly":
       "這裡保存的是該頁唯一的可檢索文本，用於搜尋、索引與快速辨識內容，不用來重建原始格式。",
     "hint.resourcesRole": "附屬電子資源列於此處，可作為整理與比對材料，但不取代中欄主閱讀 PDF。",
@@ -332,10 +340,13 @@ export const translations: Record<Locale, Record<TranslationKey, TranslationValu
     "button.importing": "Working...",
     "pageAction.cut": "Cut Page",
     "pageAction.copy": "Copy Page",
+    "pageAction.drag": "Drag Page",
     "pageAction.pasteIntoEntry": "Paste Into This Entry",
     "pageAction.remove": "Remove Page From Entry",
     "prompt.importExtract": "Extract as transcription automatically during import?",
     "prompt.transcriptionExists": "A transcription already exists. Please choose how to proceed",
+    "prompt.pdfImportStart": "Starting page. Leave blank to import from the first page",
+    "prompt.pdfImportEnd": "Ending page. Leave blank to import through the last page",
     "option.saveResourceOnly": "Save as resource only",
     "option.saveResourceAndExtract": "Save as resource and automatically extract plain text into transcription",
     "option.replaceTranscription": "Replace existing transcription",
@@ -344,6 +355,7 @@ export const translations: Record<Locale, Record<TranslationKey, TranslationValu
     "notice.extractionSuccess": "Plain text extracted successfully",
     "notice.extractionFailed": "Unable to extract plain text from this file",
     "notice.extractionUnsupported": "Automatic extraction is not supported for this file type yet",
+    "notice.invalidPdfPageRange": "Invalid PDF page range. Leave both fields blank to import all pages.",
     "hint.searchableTextOnly":
       "This field stores the page's single searchable text for search, indexing, and fast recognition, not for reconstructing original formatting.",
     "hint.resourcesRole": "Attached digital resources are listed here for reference and extraction work, but they do not replace the main reading PDF.",
@@ -454,10 +466,13 @@ export const translations: Record<Locale, Record<TranslationKey, TranslationValu
     "button.importing": "Wird verarbeitet...",
     "pageAction.cut": "Seite ausschneiden",
     "pageAction.copy": "Seite kopieren",
+    "pageAction.drag": "Seite ziehen",
     "pageAction.pasteIntoEntry": "In diesen Eintrag einfügen",
     "pageAction.remove": "Seite aus dem Eintrag entfernen",
     "prompt.importExtract": "Klartext beim Import automatisch als Transkription übernehmen?",
     "prompt.transcriptionExists": "Es ist bereits eine Transkription vorhanden. Bitte wähle aus, wie fortgefahren werden soll",
+    "prompt.pdfImportStart": "Startseite. Leer lassen, um ab der ersten Seite zu importieren",
+    "prompt.pdfImportEnd": "Endseite. Leer lassen, um bis zur letzten Seite zu importieren",
     "option.saveResourceOnly": "Nur als Ressource speichern",
     "option.saveResourceAndExtract": "Als Ressource speichern und Klartext automatisch in die Transkription übernehmen",
     "option.replaceTranscription": "Vorhandene Transkription ersetzen",
@@ -466,6 +481,7 @@ export const translations: Record<Locale, Record<TranslationKey, TranslationValu
     "notice.extractionSuccess": "Klartext wurde erfolgreich extrahiert",
     "notice.extractionFailed": "Aus dieser Datei konnte kein Klartext extrahiert werden",
     "notice.extractionUnsupported": "Für diesen Dateityp wird die automatische Extraktion derzeit nicht unterstützt",
+    "notice.invalidPdfPageRange": "Ungültiger PDF-Seitenbereich. Leer lassen, um alle Seiten zu importieren.",
     "hint.searchableTextOnly":
       "Dieses Feld speichert den einzigen durchsuchbaren Text der Seite für Suche, Indexierung und schnelle Orientierung, nicht zur Rekonstruktion des ursprünglichen Layouts.",
     "hint.resourcesRole": "Angehängte digitale Ressourcen werden hier als Hilfsmaterial geführt, ersetzen aber nicht das zentrale Lese-PDF.",

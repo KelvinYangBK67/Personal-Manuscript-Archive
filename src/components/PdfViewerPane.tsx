@@ -11,6 +11,7 @@ const minimumManualZoom = 10;
 const maximumManualZoom = 1000;
 
 interface PdfViewerPaneProps {
+  sourceKey: string;
   pdfData: Uint8Array | null;
   currentPageIndex: number;
   pageCount: number;
@@ -30,7 +31,7 @@ function clampZoom(percent: number) {
 
 export const PdfViewerPane = memo(function PdfViewerPane(props: PdfViewerPaneProps) {
   const { t } = useI18n();
-  const { pdfData, currentPageIndex, pageCount, onPageIndexChange } = props;
+  const { sourceKey, pdfData, currentPageIndex, pageCount, onPageIndexChange } = props;
   const [documentRef, setDocumentRef] = useState<PDFDocumentProxy | null>(null);
   const [loadState, setLoadState] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [loadError, setLoadError] = useState("");
@@ -43,11 +44,30 @@ export const PdfViewerPane = memo(function PdfViewerPane(props: PdfViewerPanePro
   const pendingScrollAnchorRef = useRef<ScrollAnchor | null>(null);
   const renderTaskRef = useRef<RenderTask | null>(null);
   const renderSequenceRef = useRef(0);
+  const loadedDocumentRef = useRef<PDFDocumentProxy | null>(null);
+
+  useEffect(() => {
+    pendingScrollAnchorRef.current = null;
+    renderTaskRef.current?.cancel();
+    setDocumentRef(null);
+    setLoadError("");
+    if (!pdfData) {
+      setLoadState("idle");
+    }
+    if (canvasRef.current) {
+      const canvas = canvasRef.current;
+      const context = canvas.getContext("2d");
+      if (context) {
+        context.setTransform(1, 0, 0, 1, 0, 0);
+        context.clearRect(0, 0, canvas.width, canvas.height);
+      }
+      canvas.width = 0;
+      canvas.height = 0;
+    }
+  }, [sourceKey, pdfData]);
 
   useEffect(() => {
     let cancelled = false;
-    setDocumentRef(null);
-    setLoadError("");
 
     if (!pdfData) {
       setLoadState("idle");
@@ -59,6 +79,8 @@ export const PdfViewerPane = memo(function PdfViewerPane(props: PdfViewerPanePro
     loadingTask.promise
       .then((pdf) => {
         if (!cancelled) {
+          void loadedDocumentRef.current?.destroy();
+          loadedDocumentRef.current = pdf;
           setDocumentRef(pdf);
           setLoadState("ready");
         }
@@ -75,6 +97,13 @@ export const PdfViewerPane = memo(function PdfViewerPane(props: PdfViewerPanePro
       void loadingTask.destroy();
     };
   }, [pdfData]);
+
+  useEffect(() => {
+    return () => {
+      renderTaskRef.current?.cancel();
+      void loadedDocumentRef.current?.destroy();
+    };
+  }, []);
 
   useEffect(() => {
     const element = viewerScrollRef.current;

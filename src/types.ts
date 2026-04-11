@@ -96,6 +96,8 @@ export interface CreateEntryResult {
 export interface ImportEntryPdfInput {
   entry_id: string;
   source_path: string;
+  page_start: number | null;
+  page_end: number | null;
 }
 
 export interface ImportEntryPdfResult {

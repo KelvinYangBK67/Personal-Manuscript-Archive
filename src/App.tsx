@@ -46,9 +46,31 @@ interface PendingResourceImport {
   hasExistingTranscription: boolean;
 }
 
+interface PendingPdfImport {
+  sourcePath: string;
+  pageStart: number | null;
+  pageEnd: number | null;
+}
+
 function supportsAutomaticExtraction(sourcePath: string): boolean {
   const extension = sourcePath.split(".").pop()?.toLowerCase();
-  return extension === "txt" || extension === "md" || extension === "docx";
+  return extension === "txt" || extension === "md" || extension === "docx" || extension === "tex";
+}
+
+function resolvePdfPageIndex(page: PageRecord): number {
+  if (page.original_page_number != null && page.original_page_number > 0) {
+    return page.original_page_number - 1;
+  }
+  if (page.page_number != null && page.page_number > 0) {
+    return page.page_number - 1;
+  }
+  if (page.source_pdf_page_index > 0) {
+    return page.source_pdf_page_index;
+  }
+  if (page.sort_order > 0) {
+    return page.sort_order - 1;
+  }
+  return 0;
 }
 
 function getDefaultExpandedNodeIds(entryBundle: EntryWithPages | null): string[] {
@@ -85,6 +107,7 @@ export default function App() {
   const [pendingResourceImport, setPendingResourceImport] = useState<PendingResourceImport | null>(null);
   const [pageClipboard, setPageClipboard] = useState<PageClipboardState | null>(null);
   const pageIndexLookupRef = useRef<Map<number, string>>(new Map());
+  const pdfCacheRef = useRef<Map<string, Uint8Array>>(new Map());
 
   useEffect(() => {
     if (archiveRoot) {
@@ -191,19 +214,19 @@ export default function App() {
     () =>
       [...(selectedEntryBundle?.pages ?? [])]
         .filter((page) => page.source_pdf_path === currentPdfPath)
-        .sort((a, b) => a.source_pdf_page_index - b.source_pdf_page_index),
+        .sort((a, b) => resolvePdfPageIndex(a) - resolvePdfPageIndex(b)),
     [currentPdfPath, selectedEntryBundle],
   );
-  const currentPdfPageIndex = selectedPage?.source_pdf_page_index ?? 0;
+  const currentPdfPageIndex = selectedPage ? resolvePdfPageIndex(selectedPage) : 0;
   const currentPdfPageCount = useMemo(() => {
     if (currentPdfPages.length === 0) {
       return 0;
     }
-    return Math.max(...currentPdfPages.map((page) => page.source_pdf_page_index)) + 1;
+    return Math.max(...currentPdfPages.map((page) => resolvePdfPageIndex(page))) + 1;
   }, [currentPdfPages]);
 
   useEffect(() => {
-    pageIndexLookupRef.current = new Map(currentPdfPages.map((page) => [page.source_pdf_page_index, page.id]));
+    pageIndexLookupRef.current = new Map(currentPdfPages.map((page) => [resolvePdfPageIndex(page), page.id]));
   }, [currentPdfPages]);
 
   useEffect(() => {
@@ -212,10 +235,21 @@ export default function App() {
       return;
     }
     let cancelled = false;
+    const cached = pdfCacheRef.current.get(currentPdfPath);
+    if (cached) {
+      setPdfData(new Uint8Array(cached));
+      return;
+    }
+    setPdfData(null);
     void loadBinaryAsset(archiveRoot, currentPdfPath)
       .then((data) => {
         if (!cancelled) {
-          setPdfData(data);
+          if (data) {
+            pdfCacheRef.current.set(currentPdfPath, new Uint8Array(data));
+            setPdfData(new Uint8Array(data));
+          } else {
+            setPdfData(null);
+          }
         }
       })
       .catch((error) => {
@@ -356,7 +390,7 @@ export default function App() {
     }
   }
 
-  async function handleImportPdfPages(sourcePath: string) {
+  async function handleImportPdfPages(input: PendingPdfImport) {
     if (!archiveRoot || !selectedEntryBundle) {
       return;
     }
@@ -365,7 +399,9 @@ export default function App() {
     try {
       const result = await importEntryPdf(archiveRoot, {
         entry_id: selectedEntryBundle.entry.id,
-        source_path: sourcePath,
+        source_path: input.sourcePath,
+        page_start: input.pageStart,
+        page_end: input.pageEnd,
       });
       setSnapshot(result.snapshot);
       setSelectedPageId(result.selected_page_id);
@@ -543,6 +579,7 @@ export default function App() {
         />
 
         <PdfViewerPane
+          sourceKey={currentPdfPath ?? ""}
           pdfData={pdfData}
           currentPageIndex={currentPdfPageIndex}
           pageCount={currentPdfPageCount}

@@ -25,7 +25,7 @@ interface EditorPaneProps {
   onSaveEntry: (entry: EntryRecord) => Promise<void>;
   onSavePage: (page: PageRecord) => Promise<void>;
   onImportResource: (sourcePath: string) => Promise<void>;
-  onImportPdfPages: (sourcePath: string) => Promise<void>;
+  onImportPdfPages: (input: { sourcePath: string; pageStart: number | null; pageEnd: number | null }) => Promise<void>;
   onDeleteResource: (asset: AssetRecord) => Promise<void>;
   importingResource: boolean;
 }
@@ -189,6 +189,18 @@ export function EditorPane(props: EditorPaneProps) {
   }, [entryDraft]);
   const dayOptions = useMemo(() => getValidDayOptions(selectedYear, selectedMonth), [selectedMonth, selectedYear]);
 
+  function parseOptionalPageNumber(value: string | null): number | null | "invalid" {
+    if (value == null) {
+      return "invalid";
+    }
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return null;
+    }
+    const parsed = Number(trimmed);
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : "invalid";
+  }
+
   useEffect(() => {
     if (!entryDraft) {
       return;
@@ -219,7 +231,25 @@ export function EditorPane(props: EditorPaneProps) {
       filters: [{ name: "PDF", extensions: ["pdf"] }],
     });
     if (typeof selected === "string") {
-      await onImportPdfPages(selected);
+      const startValue = window.prompt(t("prompt.pdfImportStart"), "");
+      if (startValue === null) {
+        return;
+      }
+      const endValue = window.prompt(t("prompt.pdfImportEnd"), "");
+      if (endValue === null) {
+        return;
+      }
+      const pageStart = parseOptionalPageNumber(startValue);
+      const pageEnd = parseOptionalPageNumber(endValue);
+      if (pageStart === "invalid" || pageEnd === "invalid") {
+        window.alert(t("notice.invalidPdfPageRange"));
+        return;
+      }
+      await onImportPdfPages({
+        sourcePath: selected,
+        pageStart,
+        pageEnd,
+      });
     }
   }
 

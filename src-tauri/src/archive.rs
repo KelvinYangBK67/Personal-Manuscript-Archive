@@ -110,6 +110,8 @@ pub struct CreateEntryInput {
 pub struct ImportEntryPdfInput {
     pub entry_id: String,
     pub source_path: String,
+    pub page_start: Option<i64>,
+    pub page_end: Option<i64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -437,6 +439,86 @@ fn resolve_insert_index(page_ids: &[String], target_before_page_id: Option<&str>
         .unwrap_or(page_ids.len())
 }
 
+struct NewPageRow<'a> {
+    id: &'a str,
+    entry_id: &'a str,
+    page_number: i64,
+    sort_order: i64,
+    source_asset_id: Option<&'a str>,
+    source_pdf_path: Option<&'a str>,
+    source_pdf_page_index: i64,
+    original_page_number: Option<i64>,
+    transcription_text: Option<&'a str>,
+    summary: Option<&'a str>,
+    keywords_json: Option<&'a str>,
+    page_notes: Option<&'a str>,
+    created_at: &'a str,
+    updated_at: &'a str,
+}
+
+fn insert_page_row(
+    transaction: &Transaction<'_>,
+    include_legacy_pdf_page_index: bool,
+    row: &NewPageRow<'_>,
+) -> ArchiveResult<()> {
+    if include_legacy_pdf_page_index {
+        transaction.execute(
+            "
+            INSERT INTO pages (
+              id, entry_id, page_number, page_label, sort_order, source_asset_id,
+              source_pdf_path, source_pdf_page_index, pdf_page_index, original_page_number,
+              transcription_text, summary, keywords_json, page_notes, created_at, updated_at
+            ) VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+            ",
+            params![
+                row.id,
+                row.entry_id,
+                row.page_number,
+                row.sort_order,
+                row.source_asset_id,
+                row.source_pdf_path,
+                row.source_pdf_page_index,
+                row.source_pdf_page_index,
+                row.original_page_number,
+                row.transcription_text,
+                row.summary,
+                row.keywords_json,
+                row.page_notes,
+                row.created_at,
+                row.updated_at
+            ],
+        )?;
+    } else {
+        transaction.execute(
+            "
+            INSERT INTO pages (
+              id, entry_id, page_number, page_label, sort_order, source_asset_id,
+              source_pdf_path, source_pdf_page_index, original_page_number,
+              transcription_text, summary, keywords_json, page_notes, created_at, updated_at
+            ) VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+            ",
+            params![
+                row.id,
+                row.entry_id,
+                row.page_number,
+                row.sort_order,
+                row.source_asset_id,
+                row.source_pdf_path,
+                row.source_pdf_page_index,
+                row.original_page_number,
+                row.transcription_text,
+                row.summary,
+                row.keywords_json,
+                row.page_notes,
+                row.created_at,
+                row.updated_at
+            ],
+        )?;
+    }
+
+    Ok(())
+}
+
 fn absolute_asset_path(root: &Path, relative: &str) -> PathBuf {
     let mut path = root.to_path_buf();
     for part in relative.split('/') {
@@ -537,6 +619,289 @@ fn strip_markdown_to_plain_text(value: &str) -> String {
     normalize_plain_text(&text)
 }
 
+fn is_escaped_at(value: &str, index: usize) -> bool {
+    let mut backslash_count = 0;
+    for byte in value[..index].bytes().rev() {
+        if byte == b'\\' {
+            backslash_count += 1;
+        } else {
+            break;
+        }
+    }
+    backslash_count % 2 == 1
+}
+
+fn find_unescaped(value: &str, pattern: &str, start: usize) -> Option<usize> {
+    value[start..]
+        .match_indices(pattern)
+        .map(|(index, _)| start + index)
+        .find(|index| !is_escaped_at(value, *index))
+}
+
+fn strip_tex_comments(value: &str) -> String {
+    value
+        .replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .lines()
+        .map(|line| {
+            for (index, character) in line.char_indices() {
+                if character == '%' && !is_escaped_at(line, index) {
+                    return line[..index].to_string();
+                }
+            }
+            line.to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn extract_tex_document_body(value: &str) -> String {
+    let Some(begin_index) = value.find(r"\begin{document}") else {
+        return value.to_string();
+    };
+    let body_start = begin_index + r"\begin{document}".len();
+    let body = &value[body_start..];
+    if let Some(end_index) = body.find(r"\end{document}") {
+        body[..end_index].to_string()
+    } else {
+        body.to_string()
+    }
+}
+
+fn find_next_math_environment(value: &str, start: usize) -> Option<(usize, String, usize)> {
+    let environment_pattern = Regex::new(
+        r"\\begin\{(equation\*?|align\*?|gather\*?|multline\*?|flalign\*?|split|cases|array|matrix|pmatrix|bmatrix|vmatrix|Vmatrix)\}",
+    )
+    .unwrap();
+    let capture = environment_pattern.captures(&value[start..])?;
+    let whole_match = capture.get(0)?;
+    let environment = capture.get(1)?.as_str().to_string();
+    Some((start + whole_match.start(), environment, whole_match.as_str().len()))
+}
+
+fn mask_tex_math(value: &str) -> (String, Vec<String>) {
+    let mut output = String::new();
+    let mut math_segments = Vec::new();
+    let mut cursor = 0;
+
+    while cursor < value.len() {
+        let mut candidates: Vec<(usize, &str)> = Vec::new();
+        if let Some(index) = find_unescaped(value, "$$", cursor) {
+            candidates.push((index, "$$"));
+        }
+        if let Some(index) = find_unescaped(value, "$", cursor) {
+            candidates.push((index, "$"));
+        }
+        if let Some(index) = find_unescaped(value, r"\(", cursor) {
+            candidates.push((index, r"\("));
+        }
+        if let Some(index) = find_unescaped(value, r"\[", cursor) {
+            candidates.push((index, r"\["));
+        }
+        let next_environment = find_next_math_environment(value, cursor);
+        if let Some((index, _, _)) = next_environment.as_ref() {
+            candidates.push((*index, "env"));
+        }
+
+        let Some((start, marker)) = candidates.into_iter().min_by_key(|candidate| candidate.0) else {
+            output.push_str(&value[cursor..]);
+            break;
+        };
+
+        output.push_str(&value[cursor..start]);
+
+        let (end, display_like) = match marker {
+            "$$" => find_unescaped(value, "$$", start + 2).map(|index| (index + 2, true)).unwrap_or((value.len(), true)),
+            "$" => find_unescaped(value, "$", start + 1).map(|index| (index + 1, false)).unwrap_or((value.len(), false)),
+            r"\(" => find_unescaped(value, r"\)", start + 2).map(|index| (index + 2, false)).unwrap_or((value.len(), false)),
+            r"\[" => find_unescaped(value, r"\]", start + 2).map(|index| (index + 2, true)).unwrap_or((value.len(), true)),
+            _ => {
+                let (_, environment, begin_len) = next_environment.expect("math environment candidate exists");
+                let end_pattern = format!(r"\end{{{environment}}}");
+                let segment_end = value[start + begin_len..]
+                    .find(&end_pattern)
+                    .map(|index| start + begin_len + index + end_pattern.len())
+                    .unwrap_or(value.len());
+                (segment_end, true)
+            }
+        };
+
+        let token = format!("__PMA_TEX_MATH_{}__", math_segments.len());
+        math_segments.push(value[start..end].to_string());
+        if display_like {
+            output.push_str("\n\n");
+            output.push_str(&token);
+            output.push_str("\n\n");
+        } else {
+            output.push_str(&token);
+        }
+        cursor = end;
+    }
+
+    (output, math_segments)
+}
+
+fn extract_first_braced_argument(value: &str, open_brace: usize) -> Option<(String, usize)> {
+    let mut depth = 0;
+    let mut content_start = None;
+    for (offset, character) in value[open_brace..].char_indices() {
+        let index = open_brace + offset;
+        if is_escaped_at(value, index) {
+            continue;
+        }
+        match character {
+            '{' => {
+                depth += 1;
+                if depth == 1 {
+                    content_start = Some(index + character.len_utf8());
+                }
+            }
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some((value[content_start?..index].to_string(), index + character.len_utf8()));
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn replace_tex_one_argument_commands(mut text: String, commands: &[&str], replacement: fn(&str, &str) -> String) -> String {
+    for command in commands {
+        let pattern = format!(r"\{command}");
+        loop {
+            let Some(command_index) = text.find(&pattern) else {
+                break;
+            };
+            let after_command = command_index + pattern.len();
+            let whitespace_len = text[after_command..]
+                .chars()
+                .take_while(|character| character.is_whitespace())
+                .map(char::len_utf8)
+                .sum::<usize>();
+            let brace_index = after_command + whitespace_len;
+            if !text[brace_index..].starts_with('{') {
+                text.replace_range(command_index..after_command, "");
+                continue;
+            }
+            if let Some((argument, end_index)) = extract_first_braced_argument(&text, brace_index) {
+                let next_value = replacement(command, &argument);
+                text.replace_range(command_index..end_index, &next_value);
+            } else {
+                break;
+            }
+        }
+    }
+    text
+}
+
+fn restore_tex_math(mut text: String, math_segments: &[String]) -> String {
+    for (index, segment) in math_segments.iter().enumerate() {
+        let token = format!("__PMA_TEX_MATH_{index}__");
+        text = text.replace(&token, segment);
+    }
+    text
+}
+
+fn strip_tex_to_plain_text(value: &str) -> String {
+    let without_comments = strip_tex_comments(value);
+    let body = extract_tex_document_body(&without_comments);
+    let (mut text, math_segments) = mask_tex_math(&body);
+
+    text = Regex::new(r"(?s)\\begin\{thebibliography\}.*?\\end\{thebibliography\}")
+        .unwrap()
+        .replace_all(&text, "\n")
+        .into_owned();
+    text = Regex::new(r"(?m)^\s*\\(documentclass|usepackage|newcommand|renewcommand|providecommand|def|let|setlength|pagestyle|bibliographystyle|bibliography)\b.*$")
+        .unwrap()
+        .replace_all(&text, "")
+        .into_owned();
+
+    let section_commands = ["part", "chapter", "section", "subsection", "subsubsection", "paragraph", "subparagraph"];
+    text = replace_tex_one_argument_commands(text, &section_commands, |_, argument| format!("\n\n{argument}\n\n"));
+
+    let formatting_commands = [
+        "textbf",
+        "textit",
+        "emph",
+        "textrm",
+        "textsf",
+        "texttt",
+        "textsc",
+        "underline",
+        "small",
+        "large",
+        "Large",
+        "url",
+    ];
+    text = replace_tex_one_argument_commands(text, &formatting_commands, |_, argument| argument.to_string());
+    text = replace_tex_one_argument_commands(text, &["footnote"], |_, argument| format!(" [Note: {argument}] "));
+    text = replace_tex_one_argument_commands(text, &["cite", "ref", "eqref"], |command, argument| {
+        if command == "cite" {
+            format!("[cite: {argument}]")
+        } else {
+            argument.to_string()
+        }
+    });
+    text = replace_tex_one_argument_commands(text, &["label"], |_, _| String::new());
+
+    text = Regex::new(r"\\begin\{(itemize|enumerate|description)\}")
+        .unwrap()
+        .replace_all(&text, "\n")
+        .into_owned();
+    text = Regex::new(r"\\end\{(itemize|enumerate|description)\}")
+        .unwrap()
+        .replace_all(&text, "\n")
+        .into_owned();
+    text = Regex::new(r"\\begin\{(quote|quotation|abstract|theorem|lemma|proposition|definition|remark|proof)\}")
+        .unwrap()
+        .replace_all(&text, "\n$1\n")
+        .into_owned();
+    text = Regex::new(r"\\end\{(quote|quotation|abstract|theorem|lemma|proposition|definition|remark|proof)\}")
+        .unwrap()
+        .replace_all(&text, "\n")
+        .into_owned();
+    text = Regex::new(r"\\begin\{[^}]+\}|\\end\{[^}]+\}")
+        .unwrap()
+        .replace_all(&text, "\n")
+        .into_owned();
+
+    text = Regex::new(r"\\item(?:\[[^\]]+\])?\s*")
+        .unwrap()
+        .replace_all(&text, "\n- ")
+        .into_owned();
+    text = Regex::new(r"\\\\")
+        .unwrap()
+        .replace_all(&text, "\n")
+        .into_owned();
+    text = Regex::new(r"\\par\b")
+        .unwrap()
+        .replace_all(&text, "\n\n")
+        .into_owned();
+
+    text = replace_tex_one_argument_commands(text, &["text", "mbox"], |_, argument| argument.to_string());
+    text = Regex::new(r"\\[a-zA-Z]+\*?(?:\s*\[[^\]]*\])?\s*\{([^{}]*)\}")
+        .unwrap()
+        .replace_all(&text, "$1")
+        .into_owned();
+    text = Regex::new(r"\\[a-zA-Z]+\*?")
+        .unwrap()
+        .replace_all(&text, "")
+        .into_owned();
+    text = text
+        .replace(r"\%", "%")
+        .replace(r"\&", "&")
+        .replace(r"\_", "_")
+        .replace(r"\#", "#")
+        .replace(r"\{", "{")
+        .replace(r"\}", "}")
+        .replace('~', " ");
+
+    normalize_plain_text(&restore_tex_math(text, &math_segments))
+}
+
 fn extract_docx_plain_text(path: &Path) -> ArchiveResult<String> {
     let file = fs::File::open(path)?;
     let mut archive =
@@ -579,6 +944,10 @@ fn extract_plain_text_from_path(path: &Path) -> ArchiveResult<Option<String>> {
             let bytes = fs::read(path)?;
             Ok(Some(strip_markdown_to_plain_text(&String::from_utf8_lossy(&bytes))))
         }
+        Some("tex") => {
+            let bytes = fs::read(path)?;
+            Ok(Some(strip_tex_to_plain_text(&String::from_utf8_lossy(&bytes))))
+        }
         Some("docx") => Ok(Some(extract_docx_plain_text(path)?)),
         _ => Ok(None),
     }
@@ -592,6 +961,7 @@ fn detect_asset_type(path: &Path) -> String {
 
     match extension.as_deref() {
         Some("md") => "md".into(),
+        Some("tex") => "tex".into(),
         Some("docx") => "docx".into(),
         Some("txt") => "txt".into(),
         Some("pdf") => "pdf".into(),
@@ -977,6 +1347,16 @@ pub fn import_entry_pdf(root_path: String, input: ImportEntryPdfInput) -> Result
         )
         .map_err(to_tauri_error)?;
     let pdf_page_count = read_pdf_page_count(&source_path).map_err(to_tauri_error)? as i64;
+    let has_legacy_pdf_page_index = column_exists(&transaction, "pages", "pdf_page_index").map_err(to_tauri_error)?;
+    let mut range_start = input.page_start.filter(|value| *value > 0).unwrap_or(1);
+    let mut range_end = input.page_end.filter(|value| *value > 0).unwrap_or(pdf_page_count);
+
+    range_start = range_start.min(pdf_page_count);
+    range_end = range_end.min(pdf_page_count);
+
+    if range_start < 1 || range_end < 1 || range_start > range_end {
+        return Err("Invalid PDF page range. Leave both fields empty to import all pages.".into());
+    }
 
     transaction
         .execute(
@@ -997,36 +1377,33 @@ pub fn import_entry_pdf(root_path: String, input: ImportEntryPdfInput) -> Result
         .map_err(to_tauri_error)?;
 
     let mut first_page_id: Option<String> = None;
-    for pdf_page_index in 0..pdf_page_count {
+    for pdf_page_index in (range_start - 1)..range_end {
         let page_id = next_id(&transaction, "page", "P").map_err(to_tauri_error)?;
         if first_page_id.is_none() {
             first_page_id = Some(page_id.clone());
         }
-        let sort_order = existing_page_count + pdf_page_index + 1;
-        transaction
-            .execute(
-                "
-                INSERT INTO pages (
-                  id, entry_id, page_number, page_label, sort_order, source_asset_id,
-                  source_pdf_path, source_pdf_page_index, original_page_number,
-                  transcription_text, summary, keywords_json, page_notes,
-                  created_at, updated_at
-                ) VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?6, ?7, ?8, NULL, NULL, '[]', NULL, ?9, ?10)
-                ",
-                params![
-                    page_id.as_str(),
-                    input.entry_id.as_str(),
-                    sort_order,
-                    sort_order,
-                    asset_id.as_str(),
-                    relative_pdf.as_str(),
-                    pdf_page_index,
-                    pdf_page_index + 1,
-                    now.as_str(),
-                    now.as_str()
-                ],
-            )
-            .map_err(to_tauri_error)?;
+        let sort_order = existing_page_count + (pdf_page_index - (range_start - 1)) + 1;
+        insert_page_row(
+            &transaction,
+            has_legacy_pdf_page_index,
+            &NewPageRow {
+                id: page_id.as_str(),
+                entry_id: input.entry_id.as_str(),
+                page_number: sort_order,
+                sort_order,
+                source_asset_id: Some(asset_id.as_str()),
+                source_pdf_path: Some(relative_pdf.as_str()),
+                source_pdf_page_index: pdf_page_index,
+                original_page_number: Some(pdf_page_index + 1),
+                transcription_text: None,
+                summary: None,
+                keywords_json: Some("[]"),
+                page_notes: None,
+                created_at: now.as_str(),
+                updated_at: now.as_str(),
+            },
+        )
+        .map_err(to_tauri_error)?;
     }
 
     transaction
@@ -1144,36 +1521,31 @@ pub fn copy_page(root_path: String, input: PageMutationInput) -> Result<PageMuta
         .optional()
         .map_err(to_tauri_error)?
         .ok_or_else(|| "The selected page does not exist.".to_string())?;
+    let has_legacy_pdf_page_index = column_exists(&transaction, "pages", "pdf_page_index").map_err(to_tauri_error)?;
 
     let page_id = next_id(&transaction, "page", "P").map_err(to_tauri_error)?;
     let now = now_iso();
-    transaction
-        .execute(
-            "
-            INSERT INTO pages (
-              id, entry_id, page_number, page_label, sort_order, source_asset_id,
-              source_pdf_path, source_pdf_page_index, original_page_number,
-              transcription_text, summary, keywords_json, page_notes, created_at, updated_at
-            ) VALUES (?1, ?2, ?3, ?4, 0, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
-            ",
-            params![
-                page_id.as_str(),
-                input.target_entry_id.as_str(),
-                source_page.page_number,
-                source_page.page_label.as_deref(),
-                source_page.source_asset_id.as_deref(),
-                source_page.source_pdf_path.as_deref(),
-                source_page.source_pdf_page_index,
-                source_page.original_page_number,
-                source_page.transcription_text.as_deref(),
-                source_page.summary.as_deref(),
-                source_page.keywords_json.as_deref(),
-                source_page.page_notes.as_deref(),
-                now.as_str(),
-                now.as_str()
-            ],
-        )
-        .map_err(to_tauri_error)?;
+    insert_page_row(
+        &transaction,
+        has_legacy_pdf_page_index,
+        &NewPageRow {
+            id: page_id.as_str(),
+            entry_id: input.target_entry_id.as_str(),
+            page_number: source_page.page_number.unwrap_or(1),
+            sort_order: 0,
+            source_asset_id: source_page.source_asset_id.as_deref(),
+            source_pdf_path: source_page.source_pdf_path.as_deref(),
+            source_pdf_page_index: source_page.source_pdf_page_index,
+            original_page_number: source_page.original_page_number,
+            transcription_text: source_page.transcription_text.as_deref(),
+            summary: source_page.summary.as_deref(),
+            keywords_json: source_page.keywords_json.as_deref(),
+            page_notes: source_page.page_notes.as_deref(),
+            created_at: now.as_str(),
+            updated_at: now.as_str(),
+        },
+    )
+    .map_err(to_tauri_error)?;
 
     let mut target_page_ids =
         load_page_ids_for_entry(&transaction, input.target_entry_id.as_str()).map_err(to_tauri_error)?;
@@ -1531,4 +1903,149 @@ pub fn delete_entry(root_path: String, entry_id: String) -> Result<ArchiveSnapsh
         .map_err(to_tauri_error)?;
 
     load_snapshot_internal(&root).map_err(to_tauri_error)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tex_extracts_plain_document_text() {
+        let output = strip_tex_to_plain_text(
+            r"
+            \documentclass{article}
+            \begin{document}
+            This is plain text.
+
+            This is another paragraph.
+            \end{document}
+            ",
+        );
+
+        assert!(output.contains("This is plain text."));
+        assert!(output.contains("This is another paragraph."));
+        assert!(!output.contains(r"\documentclass"));
+    }
+
+    #[test]
+    fn tex_keeps_section_titles_as_text() {
+        let output = strip_tex_to_plain_text(
+            r"
+            \begin{document}
+            \section{Main Title}
+            \subsection{Minor Title}
+            Body text.
+            \end{document}
+            ",
+        );
+
+        assert!(output.contains("Main Title"));
+        assert!(output.contains("Minor Title"));
+        assert!(!output.contains(r"\section"));
+    }
+
+    #[test]
+    fn tex_preserves_inline_math() {
+        let output = strip_tex_to_plain_text(r"We define $f(x)=x^2$ and \(a_n\to 0\).");
+
+        assert!(output.contains(r"$f(x)=x^2$"));
+        assert!(output.contains(r"\(a_n\to 0\)"));
+    }
+
+    #[test]
+    fn tex_preserves_display_math() {
+        let output = strip_tex_to_plain_text(
+            r"
+            We have
+            \[
+            \int_0^1 f(x)\,dx
+            \]
+            therefore.
+            ",
+        );
+
+        assert!(output.contains(r"\["));
+        assert!(output.contains(r"\int_0^1 f(x)\,dx"));
+        assert!(output.contains("therefore."));
+    }
+
+    #[test]
+    fn tex_preserves_equation_and_align_environments() {
+        let equation = strip_tex_to_plain_text(
+            r"
+            \begin{equation}
+            E = mc^2
+            \end{equation}
+            ",
+        );
+        let align = strip_tex_to_plain_text(
+            r"
+            \begin{align}
+            a &= b+c\\
+            d &= e
+            \end{align}
+            ",
+        );
+
+        assert!(equation.contains(r"\begin{equation}"));
+        assert!(equation.contains("E = mc^2"));
+        assert!(align.contains(r"\begin{align}"));
+        assert!(align.contains(r"a &= b+c\\"));
+    }
+
+    #[test]
+    fn tex_extracts_footnote_text() {
+        let output = strip_tex_to_plain_text(r"Text\footnote{Important note} continues.");
+
+        assert!(output.contains("Text"));
+        assert!(output.contains("Important note"));
+        assert!(output.contains("continues."));
+    }
+
+    #[test]
+    fn tex_extracts_list_items() {
+        let output = strip_tex_to_plain_text(
+            r"
+            \begin{itemize}
+            \item First item
+            \item Second item
+            \end{itemize}
+            ",
+        );
+
+        assert!(output.contains("- First item"));
+        assert!(output.contains("- Second item"));
+        assert!(!output.contains(r"\begin{itemize}"));
+    }
+
+    #[test]
+    fn tex_keeps_unknown_command_argument_text() {
+        let output = strip_tex_to_plain_text(r"Before \unknowncommand{valuable text} after.");
+
+        assert!(output.contains("valuable text"));
+        assert!(!output.contains(r"\unknowncommand"));
+    }
+
+    #[test]
+    fn tex_extracts_without_document_environment() {
+        let output = strip_tex_to_plain_text(r"\textbf{Standalone text}");
+
+        assert_eq!(output, "Standalone text");
+    }
+
+    #[test]
+    fn tex_removes_comments_without_touching_escaped_percent() {
+        let output = strip_tex_to_plain_text(
+            r"
+            Visible 100\% text. % hidden comment
+            % whole line hidden
+            Still visible.
+            ",
+        );
+
+        assert!(output.contains("Visible 100% text."));
+        assert!(output.contains("Still visible."));
+        assert!(!output.contains("hidden comment"));
+        assert!(!output.contains("whole line hidden"));
+    }
 }

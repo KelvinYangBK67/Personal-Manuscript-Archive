@@ -347,6 +347,22 @@ textarea {
   border-radius: 6px;
 }
 
+.tree-drag-handle {
+  width: 18px;
+  min-width: 18px;
+  height: 18px;
+  border: none;
+  background: transparent;
+  padding: 0;
+  border-radius: 6px;
+  color: #8a7c68;
+  cursor: grab;
+}
+
+.tree-drag-handle:active {
+  cursor: grabbing;
+}
+
 .tree-label-button {
   flex: 1;
   min-width: 0;
