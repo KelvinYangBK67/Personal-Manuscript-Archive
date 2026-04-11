@@ -163,7 +163,17 @@ pub struct SearchResult {
     pub page_number: Option<i64>,
     pub label: String,
     pub snippet: String,
+    pub snippet_parts: Vec<SnippetPart>,
+    pub highlight_terms: Vec<String>,
+    pub match_count: i64,
+    pub query_summary: Option<String>,
     pub matched_field: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SnippetPart {
+    pub text: String,
+    pub highlighted: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -541,10 +551,460 @@ fn clean_optional(value: &str) -> Option<String> {
     }
 }
 
-fn build_search_snippet(text: &str, query: &str) -> String {
-    let single_line = text.replace('\n', " ");
-    let _ = query;
-    single_line.chars().take(120).collect()
+#[derive(Debug, Clone, PartialEq)]
+enum SearchToken {
+    Term(String),
+    Op(SearchOperator),
+    LParen,
+    RParen,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SearchOperator {
+    And,
+    Or,
+    Not,
+    Nand,
+    Nor,
+    Xor,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum SearchExpr {
+    Term(String),
+    Not(Box<SearchExpr>),
+    And(Box<SearchExpr>, Box<SearchExpr>),
+    Or(Box<SearchExpr>, Box<SearchExpr>),
+    Nand(Box<SearchExpr>, Box<SearchExpr>),
+    Nor(Box<SearchExpr>, Box<SearchExpr>),
+    Xor(Box<SearchExpr>, Box<SearchExpr>),
+}
+
+#[derive(Debug, Clone)]
+struct QueryEvaluation {
+    matched: bool,
+    positive_terms: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct SearchCandidate {
+    result_type: String,
+    entry_id: String,
+    page_id: Option<String>,
+    entry_title: String,
+    page_number: Option<i64>,
+    source_text: String,
+    matched_field: String,
+}
+
+fn classify_operator(value: &str) -> Option<SearchOperator> {
+    match value.to_ascii_uppercase().as_str() {
+        "AND" => Some(SearchOperator::And),
+        "OR" => Some(SearchOperator::Or),
+        "NOT" => Some(SearchOperator::Not),
+        "NAND" => Some(SearchOperator::Nand),
+        "NOR" => Some(SearchOperator::Nor),
+        "XOR" => Some(SearchOperator::Xor),
+        _ => None,
+    }
+}
+
+fn tokenize_search_query(query: &str) -> Result<Vec<SearchToken>, String> {
+    let chars: Vec<char> = query.chars().collect();
+    let mut tokens = Vec::new();
+    let mut index = 0;
+
+    while index < chars.len() {
+        if chars[index].is_whitespace() {
+            index += 1;
+            continue;
+        }
+
+        if chars[index] == '"' {
+            index += 1;
+            let mut value = String::new();
+            let mut closed = false;
+            while index < chars.len() {
+                if chars[index] == '"' {
+                    closed = true;
+                    index += 1;
+                    break;
+                }
+                value.push(chars[index]);
+                index += 1;
+            }
+            if !closed {
+                return Err("Invalid search query: unclosed quote".into());
+            }
+            if value.trim().is_empty() {
+                return Err("Invalid search query: empty quoted phrase".into());
+            }
+            tokens.push(SearchToken::Term(value));
+            continue;
+        }
+
+        if chars[index] == '(' {
+            tokens.push(SearchToken::LParen);
+            index += 1;
+            continue;
+        }
+
+        if chars[index] == ')' {
+            tokens.push(SearchToken::RParen);
+            index += 1;
+            continue;
+        }
+
+        let start = index;
+        while index < chars.len() && !chars[index].is_whitespace() && chars[index] != '(' && chars[index] != ')' {
+            index += 1;
+        }
+        let value: String = chars[start..index].iter().collect();
+        if let Some(operator) = classify_operator(&value) {
+            tokens.push(SearchToken::Op(operator));
+        } else {
+            tokens.push(SearchToken::Term(value));
+        }
+    }
+
+    if tokens.is_empty() {
+        return Err("Invalid search query: empty query".into());
+    }
+
+    Ok(tokens)
+}
+
+struct SearchParser {
+    tokens: Vec<SearchToken>,
+    index: usize,
+}
+
+impl SearchParser {
+    fn new(tokens: Vec<SearchToken>) -> Self {
+        Self { tokens, index: 0 }
+    }
+
+    fn parse(mut self) -> Result<SearchExpr, String> {
+        let expression = self.parse_or_nor()?;
+        if self.index < self.tokens.len() {
+            return Err(format!("Invalid search query: unexpected token {:?}", self.tokens[self.index]));
+        }
+        Ok(expression)
+    }
+
+    fn peek(&self) -> Option<&SearchToken> {
+        self.tokens.get(self.index)
+    }
+
+    fn consume_operator(&mut self, expected: &[SearchOperator]) -> Option<SearchOperator> {
+        let Some(SearchToken::Op(operator)) = self.peek() else {
+            return None;
+        };
+        if expected.contains(operator) {
+            let consumed = *operator;
+            self.index += 1;
+            Some(consumed)
+        } else {
+            None
+        }
+    }
+
+    fn parse_or_nor(&mut self) -> Result<SearchExpr, String> {
+        let mut expression = self.parse_xor()?;
+        while let Some(operator) = self.consume_operator(&[SearchOperator::Or, SearchOperator::Nor]) {
+            let right = self.parse_xor().map_err(|_| "Invalid search query: dangling operator".to_string())?;
+            expression = match operator {
+                SearchOperator::Or => SearchExpr::Or(Box::new(expression), Box::new(right)),
+                SearchOperator::Nor => SearchExpr::Nor(Box::new(expression), Box::new(right)),
+                _ => unreachable!(),
+            };
+        }
+        Ok(expression)
+    }
+
+    fn parse_xor(&mut self) -> Result<SearchExpr, String> {
+        let mut expression = self.parse_and_nand()?;
+        while self.consume_operator(&[SearchOperator::Xor]).is_some() {
+            let right = self.parse_and_nand().map_err(|_| "Invalid search query: dangling operator".to_string())?;
+            expression = SearchExpr::Xor(Box::new(expression), Box::new(right));
+        }
+        Ok(expression)
+    }
+
+    fn parse_and_nand(&mut self) -> Result<SearchExpr, String> {
+        let mut expression = self.parse_not()?;
+        while let Some(operator) = self.consume_operator(&[SearchOperator::And, SearchOperator::Nand]) {
+            let right = self.parse_not().map_err(|_| "Invalid search query: dangling operator".to_string())?;
+            expression = match operator {
+                SearchOperator::And => SearchExpr::And(Box::new(expression), Box::new(right)),
+                SearchOperator::Nand => SearchExpr::Nand(Box::new(expression), Box::new(right)),
+                _ => unreachable!(),
+            };
+        }
+        Ok(expression)
+    }
+
+    fn parse_not(&mut self) -> Result<SearchExpr, String> {
+        if self.consume_operator(&[SearchOperator::Not]).is_some() {
+            if matches!(self.peek(), None | Some(SearchToken::Op(_)) | Some(SearchToken::RParen)) {
+                return Err("Invalid search query: unexpected token after NOT".into());
+            }
+            return Ok(SearchExpr::Not(Box::new(self.parse_not()?)));
+        }
+        self.parse_primary()
+    }
+
+    fn parse_primary(&mut self) -> Result<SearchExpr, String> {
+        match self.peek().cloned() {
+            Some(SearchToken::Term(value)) => {
+                self.index += 1;
+                if matches!(self.peek(), Some(SearchToken::Term(_)) | Some(SearchToken::LParen)) {
+                    return Err("Invalid search query: missing operator between terms".into());
+                }
+                Ok(SearchExpr::Term(value))
+            }
+            Some(SearchToken::LParen) => {
+                self.index += 1;
+                let expression = self.parse_or_nor()?;
+                match self.peek() {
+                    Some(SearchToken::RParen) => {
+                        self.index += 1;
+                        Ok(expression)
+                    }
+                    _ => Err("Invalid search query: unclosed parenthesis".into()),
+                }
+            }
+            Some(SearchToken::Op(_)) => Err("Invalid search query: dangling operator".into()),
+            Some(SearchToken::RParen) => Err("Invalid search query: unexpected closing parenthesis".into()),
+            None => Err("Invalid search query: dangling operator".into()),
+        }
+    }
+}
+
+fn parse_search_query(query: &str) -> Result<SearchExpr, String> {
+    SearchParser::new(tokenize_search_query(query)?).parse()
+}
+
+fn text_contains_case_insensitive(text: &str, term: &str) -> bool {
+    text.to_lowercase().contains(&term.to_lowercase())
+}
+
+fn merge_terms(mut terms: Vec<String>) -> Vec<String> {
+    terms.retain(|term| !term.trim().is_empty());
+    terms.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()).then_with(|| b.len().cmp(&a.len())));
+    terms.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+    terms
+}
+
+fn evaluate_search_expr(expression: &SearchExpr, text: &str) -> QueryEvaluation {
+    match expression {
+        SearchExpr::Term(value) => {
+            let matched = text_contains_case_insensitive(text, value);
+            QueryEvaluation {
+                matched,
+                positive_terms: if matched { vec![value.clone()] } else { Vec::new() },
+            }
+        }
+        SearchExpr::Not(inner) => {
+            let evaluation = evaluate_search_expr(inner, text);
+            QueryEvaluation {
+                matched: !evaluation.matched,
+                positive_terms: Vec::new(),
+            }
+        }
+        SearchExpr::And(left, right) => {
+            let left = evaluate_search_expr(left, text);
+            let right = evaluate_search_expr(right, text);
+            QueryEvaluation {
+                matched: left.matched && right.matched,
+                positive_terms: if left.matched && right.matched {
+                    merge_terms([left.positive_terms, right.positive_terms].concat())
+                } else {
+                    Vec::new()
+                },
+            }
+        }
+        SearchExpr::Or(left, right) => {
+            let left = evaluate_search_expr(left, text);
+            let right = evaluate_search_expr(right, text);
+            let mut terms = Vec::new();
+            if left.matched {
+                terms.extend(left.positive_terms);
+            }
+            if right.matched {
+                terms.extend(right.positive_terms);
+            }
+            QueryEvaluation {
+                matched: left.matched || right.matched,
+                positive_terms: merge_terms(terms),
+            }
+        }
+        SearchExpr::Nand(left, right) => {
+            let left = evaluate_search_expr(left, text);
+            let right = evaluate_search_expr(right, text);
+            let matched = !(left.matched && right.matched);
+            let mut terms = Vec::new();
+            if matched && left.matched && !right.matched {
+                terms.extend(left.positive_terms);
+            }
+            if matched && right.matched && !left.matched {
+                terms.extend(right.positive_terms);
+            }
+            QueryEvaluation {
+                matched,
+                positive_terms: merge_terms(terms),
+            }
+        }
+        SearchExpr::Nor(left, right) => {
+            let left = evaluate_search_expr(left, text);
+            let right = evaluate_search_expr(right, text);
+            QueryEvaluation {
+                matched: !(left.matched || right.matched),
+                positive_terms: Vec::new(),
+            }
+        }
+        SearchExpr::Xor(left, right) => {
+            let left = evaluate_search_expr(left, text);
+            let right = evaluate_search_expr(right, text);
+            let matched = left.matched ^ right.matched;
+            let positive_terms = if matched && left.matched {
+                left.positive_terms
+            } else if matched && right.matched {
+                right.positive_terms
+            } else {
+                Vec::new()
+            };
+            QueryEvaluation {
+                matched,
+                positive_terms: merge_terms(positive_terms),
+            }
+        }
+    }
+}
+
+fn find_case_insensitive_ranges(text: &str, term: &str) -> Vec<(usize, usize)> {
+    let lower_text = text.to_lowercase();
+    let lower_term = term.to_lowercase();
+    if lower_term.is_empty() {
+        return Vec::new();
+    }
+    let mut ranges = Vec::new();
+    let mut start = 0;
+    while let Some(relative_index) = lower_text[start..].find(&lower_term) {
+        let range_start = start + relative_index;
+        let range_end = range_start + lower_term.len();
+        if text.is_char_boundary(range_start) && text.is_char_boundary(range_end) {
+            ranges.push((range_start, range_end));
+        }
+        start = range_start + lower_term.len().max(1);
+    }
+    ranges
+}
+
+fn merge_highlight_ranges(mut ranges: Vec<(usize, usize)>) -> Vec<(usize, usize)> {
+    ranges.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| b.1.cmp(&a.1)));
+    let mut merged: Vec<(usize, usize)> = Vec::new();
+    for (start, end) in ranges {
+        if start >= end {
+            continue;
+        }
+        match merged.last_mut() {
+            Some((_, last_end)) if start <= *last_end => {
+                *last_end = (*last_end).max(end);
+            }
+            _ => merged.push((start, end)),
+        }
+    }
+    merged
+}
+
+fn boundary_before(text: &str, target: usize) -> usize {
+    let mut boundary = 0;
+    for (index, _) in text.char_indices() {
+        if index > target {
+            break;
+        }
+        boundary = index;
+    }
+    boundary
+}
+
+fn boundary_after(text: &str, target: usize) -> usize {
+    for (index, _) in text.char_indices() {
+        if index >= target {
+            return index;
+        }
+    }
+    text.len()
+}
+
+fn make_snippet_parts(text: &str, terms: &[String]) -> (String, Vec<SnippetPart>, i64, Vec<String>) {
+    let mut highlight_terms = Vec::new();
+    let mut ranges = Vec::new();
+
+    let mut sorted_terms = terms.to_vec();
+    sorted_terms.sort_by_key(|term| std::cmp::Reverse(term.len()));
+    for term in sorted_terms {
+        let term_ranges = find_case_insensitive_ranges(text, &term);
+        if !term_ranges.is_empty() {
+            highlight_terms.push(term);
+            ranges.extend(term_ranges);
+        }
+    }
+
+    let match_count = ranges.len() as i64;
+    let ranges = merge_highlight_ranges(ranges);
+    let (snippet_start, snippet_end, prefix_ellipsis, suffix_ellipsis) = if let Some((first_start, first_end)) = ranges.first().copied() {
+        let start = boundary_before(text, first_start.saturating_sub(40));
+        let end = boundary_after(text, (first_end + 80).min(text.len()));
+        (start, end, start > 0, end < text.len())
+    } else {
+        let end = boundary_after(text, text.char_indices().nth(140).map(|(index, _)| index).unwrap_or(text.len()));
+        (0, end, false, end < text.len())
+    };
+
+    let mut parts = Vec::new();
+    if prefix_ellipsis {
+        parts.push(SnippetPart {
+            text: "... ".into(),
+            highlighted: false,
+        });
+    }
+
+    let mut cursor = snippet_start;
+    for (start, end) in ranges
+        .into_iter()
+        .filter(|(start, end)| *end > snippet_start && *start < snippet_end)
+        .map(|(start, end)| (start.max(snippet_start), end.min(snippet_end)))
+    {
+        if cursor < start {
+            parts.push(SnippetPart {
+                text: text[cursor..start].to_string(),
+                highlighted: false,
+            });
+        }
+        parts.push(SnippetPart {
+            text: text[start..end].to_string(),
+            highlighted: true,
+        });
+        cursor = end;
+    }
+
+    if cursor < snippet_end {
+        parts.push(SnippetPart {
+            text: text[cursor..snippet_end].to_string(),
+            highlighted: false,
+        });
+    }
+    if suffix_ellipsis {
+        parts.push(SnippetPart {
+            text: " ...".into(),
+            highlighted: false,
+        });
+    }
+
+    let snippet = parts.iter().map(|part| part.text.as_str()).collect::<String>();
+    (snippet, parts, match_count, merge_terms(highlight_terms))
 }
 
 fn unique_trash_destination(root: &Path, file_name: &str) -> PathBuf {
@@ -1763,7 +2223,7 @@ pub fn search_archive(root_path: String, mode: String, query: String) -> Result<
         return Ok(Vec::new());
     }
 
-    let like_query = format!("%{}%", trimmed_query.to_lowercase());
+    let expression = parse_search_query(trimmed_query).map_err(|error| error.to_string())?;
     let sql = if mode == "full_text" {
         "
         SELECT
@@ -1772,20 +2232,11 @@ pub fn search_archive(root_path: String, mode: String, query: String) -> Result<
           p.id,
           e.title,
           p.page_number,
-          COALESCE(p.transcription_text, p.summary, p.page_notes, ''),
-          CASE
-            WHEN LOWER(COALESCE(p.transcription_text, '')) LIKE ?1 THEN 'transcription_text'
-            WHEN LOWER(COALESCE(p.summary, '')) LIKE ?1 THEN 'summary'
-            ELSE 'page_notes'
-          END
+          TRIM(COALESCE(p.transcription_text, '') || char(10) || COALESCE(p.summary, '') || char(10) || COALESCE(p.page_notes, '')),
+          'transcription_text'
         FROM pages p
         JOIN entries e ON e.id = p.entry_id
-        WHERE
-          LOWER(COALESCE(p.transcription_text, '')) LIKE ?1 OR
-          LOWER(COALESCE(p.summary, '')) LIKE ?1 OR
-          LOWER(COALESCE(p.page_notes, '')) LIKE ?1
         ORDER BY e.updated_at DESC, p.sort_order ASC
-        LIMIT 200
         "
     } else {
         "
@@ -1799,42 +2250,17 @@ pub fn search_archive(root_path: String, mode: String, query: String) -> Result<
           p.id,
           e.title,
           p.page_number,
-          COALESCE(
-            p.summary,
-            p.page_notes,
-            e.description,
-            e.tags_json,
-            e.entry_type,
-            e.title,
-            ''
-          ),
-          CASE
-            WHEN LOWER(COALESCE(e.title, '')) LIKE ?1 THEN 'title'
-            WHEN LOWER(COALESCE(e.description, '')) LIKE ?1 THEN 'description'
-            WHEN LOWER(COALESCE(e.entry_type, '')) LIKE ?1 THEN 'entry_type'
-            WHEN LOWER(COALESCE(e.tags_json, '')) LIKE ?1 THEN 'tags_json'
-            WHEN LOWER(COALESCE(p.summary, '')) LIKE ?1 THEN 'summary'
-            WHEN LOWER(COALESCE(p.keywords_json, '')) LIKE ?1 THEN 'keywords_json'
-            ELSE 'page_notes'
-          END
+          TRIM(COALESCE(e.title, '') || char(10) || COALESCE(e.description, '') || char(10) || COALESCE(e.entry_type, '') || char(10) || COALESCE(e.tags_json, '') || char(10) || COALESCE(p.summary, '') || char(10) || COALESCE(p.keywords_json, '') || char(10) || COALESCE(p.page_notes, '')),
+          'description'
         FROM entries e
         LEFT JOIN pages p ON p.entry_id = e.id
-        WHERE
-          LOWER(COALESCE(e.title, '')) LIKE ?1 OR
-          LOWER(COALESCE(e.description, '')) LIKE ?1 OR
-          LOWER(COALESCE(e.entry_type, '')) LIKE ?1 OR
-          LOWER(COALESCE(e.tags_json, '')) LIKE ?1 OR
-          LOWER(COALESCE(p.summary, '')) LIKE ?1 OR
-          LOWER(COALESCE(p.keywords_json, '')) LIKE ?1 OR
-          LOWER(COALESCE(p.page_notes, '')) LIKE ?1
         ORDER BY e.updated_at DESC
-        LIMIT 200
         "
     };
 
     let mut statement = connection.prepare(sql).map_err(to_tauri_error)?;
     let rows = statement
-        .query_map(params![like_query], |row| {
+        .query_map([], |row| {
             let result_type: String = row.get(0)?;
             let entry_id: String = row.get(1)?;
             let page_id: Option<String> = row.get(2)?;
@@ -1842,29 +2268,59 @@ pub fn search_archive(root_path: String, mode: String, query: String) -> Result<
             let page_number: Option<i64> = row.get(4)?;
             let source_text: String = row.get(5)?;
             let matched_field: String = row.get(6)?;
-            let label = if result_type == "page" {
-                match page_number {
-                    Some(number) => format!("{entry_title} - Page {number}"),
-                    None => format!("{entry_title} - Page"),
-                }
-            } else {
-                entry_title.clone()
-            };
-
-            Ok(SearchResult {
+            Ok(SearchCandidate {
                 result_type,
                 entry_id,
                 page_id,
                 entry_title,
                 page_number,
-                label,
-                snippet: build_search_snippet(&source_text, trimmed_query),
+                source_text,
                 matched_field,
             })
         })
         .map_err(to_tauri_error)?;
 
-    rows.collect::<Result<Vec<_>, _>>().map_err(to_tauri_error)
+    let candidates = rows.collect::<Result<Vec<_>, _>>().map_err(to_tauri_error)?;
+    let mut results = Vec::new();
+
+    for candidate in candidates {
+        let evaluation = evaluate_search_expr(&expression, &candidate.source_text);
+        if !evaluation.matched {
+            continue;
+        }
+
+        let label = if candidate.result_type == "page" {
+            match candidate.page_number {
+                Some(number) => format!("{} - Page {}", candidate.entry_title, number),
+                None => format!("{} - Page", candidate.entry_title),
+            }
+        } else {
+            candidate.entry_title.clone()
+        };
+        let (snippet, snippet_parts, match_count, highlight_terms) =
+            make_snippet_parts(&candidate.source_text, &evaluation.positive_terms);
+
+        results.push(SearchResult {
+            result_type: candidate.result_type,
+            entry_id: candidate.entry_id,
+            page_id: candidate.page_id,
+            entry_title: candidate.entry_title,
+            page_number: candidate.page_number,
+            label,
+            snippet,
+            snippet_parts,
+            highlight_terms,
+            match_count,
+            query_summary: None,
+            matched_field: candidate.matched_field,
+        });
+
+        if results.len() >= 200 {
+            break;
+        }
+    }
+
+    Ok(results)
 }
 
 #[tauri::command]
@@ -2047,5 +2503,95 @@ mod tests {
         assert!(output.contains("Still visible."));
         assert!(!output.contains("hidden comment"));
         assert!(!output.contains("whole line hidden"));
+    }
+
+    fn query_matches(query: &str, text: &str) -> bool {
+        let expression = parse_search_query(query).expect("query should parse");
+        evaluate_search_expr(&expression, text).matched
+    }
+
+    #[test]
+    fn search_query_matches_single_word_and_quoted_phrase() {
+        assert!(query_matches("sanskrit", "A Sanskrit grammar note."));
+        assert!(query_matches("\"socialist china\"", "Notes on Socialist China in translation."));
+        assert!(!query_matches("\"socialist china\"", "Socialist debates in China."));
+    }
+
+    #[test]
+    fn search_query_supports_and_or_not() {
+        assert!(query_matches("\"sanskrit\" AND \"grammar\"", "Sanskrit grammar."));
+        assert!(query_matches("\"sanskrit\" OR \"pali\"", "Pali grammar."));
+        assert!(query_matches("\"sanskrit\" AND NOT \"pali\"", "Sanskrit grammar."));
+        assert!(!query_matches("\"sanskrit\" AND NOT \"pali\"", "Sanskrit and Pali grammar."));
+    }
+
+    #[test]
+    fn search_query_supports_nand_nor_xor() {
+        assert!(query_matches("\"sanskrit\" NAND \"pali\"", "Sanskrit grammar."));
+        assert!(!query_matches("\"sanskrit\" NAND \"pali\"", "Sanskrit Pali grammar."));
+        assert!(query_matches("\"sanskrit\" NOR \"pali\"", "Greek grammar."));
+        assert!(!query_matches("\"sanskrit\" NOR \"pali\"", "Pali grammar."));
+        assert!(query_matches("\"sanskrit\" XOR \"pali\"", "Sanskrit grammar."));
+        assert!(!query_matches("\"sanskrit\" XOR \"pali\"", "Sanskrit Pali grammar."));
+    }
+
+    #[test]
+    fn search_query_distinguishes_literal_text_from_logic() {
+        assert!(query_matches("\"A\" AND \"B\"", "A and B are separate letters."));
+        assert!(!query_matches("\"A\" AND \"B\"", "A alone."));
+        assert!(query_matches("\"A AND B\"", "The literal A AND B appears here."));
+        assert!(!query_matches("\"A AND B\"", "A plus B appear separately."));
+        assert!(query_matches("\"AND\"", "The word AND is literal."));
+    }
+
+    #[test]
+    fn search_query_uses_operator_precedence_and_parentheses() {
+        assert!(query_matches("\"A\" OR \"B\" AND \"C\"", "B C"));
+        assert!(!query_matches("(\"A\" OR \"B\") AND \"C\"", "A only"));
+        assert!(query_matches("(\"A\" OR \"B\") AND \"C\"", "A plus C"));
+    }
+
+    #[test]
+    fn search_snippet_handles_start_middle_and_end_matches() {
+        let (start_snippet, start_parts, _, _) = make_snippet_parts("grammar begins this note", &["grammar".into()]);
+        let (middle_snippet, middle_parts, _, _) =
+            make_snippet_parts("Before the long Sanskrit grammar passage after.", &["grammar".into()]);
+        let (end_snippet, end_parts, _, _) = make_snippet_parts("This note ends with grammar", &["grammar".into()]);
+
+        assert!(start_snippet.starts_with("grammar"));
+        assert!(middle_snippet.contains("grammar"));
+        assert!(end_snippet.ends_with("grammar"));
+        assert!(start_parts.iter().any(|part| part.highlighted));
+        assert!(middle_parts.iter().any(|part| part.highlighted));
+        assert!(end_parts.iter().any(|part| part.highlighted));
+    }
+
+    #[test]
+    fn search_highlight_merges_overlap_and_counts_multiple_matches() {
+        let (snippet, parts, count, terms) =
+            make_snippet_parts("socialist china and socialist thought", &["socialist china".into(), "socialist".into()]);
+
+        assert!(snippet.contains("socialist china"));
+        assert!(count >= 3);
+        assert!(terms.iter().any(|term| term.eq_ignore_ascii_case("socialist china")));
+        assert!(parts.iter().any(|part| part.highlighted && part.text.eq_ignore_ascii_case("socialist china")));
+
+        let (_, adjacent_parts, _, _) = make_snippet_parts("abab", &["ab".into()]);
+        let highlighted = adjacent_parts
+            .iter()
+            .filter(|part| part.highlighted)
+            .map(|part| part.text.as_str())
+            .collect::<Vec<_>>()
+            .join("");
+        assert_eq!(highlighted, "abab");
+    }
+
+    #[test]
+    fn search_query_rejects_invalid_syntax() {
+        assert!(parse_search_query("\"unterminated").is_err());
+        assert!(parse_search_query("\"A\" AND OR \"B\"").is_err());
+        assert!(parse_search_query("NOT").is_err());
+        assert!(parse_search_query("\"A\" AND").is_err());
+        assert!(parse_search_query("\"A\" \"B\"").is_err());
     }
 }

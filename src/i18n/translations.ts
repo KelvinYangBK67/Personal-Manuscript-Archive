@@ -25,6 +25,7 @@ export type TranslationKey =
   | "nav.searchPlaceholder"
   | "nav.metadataSearch"
   | "nav.fullTextSearch"
+  | "nav.searchSyntaxHint"
   | "nav.newEntry"
   | "nav.deleteEntry"
   | "nav.results"
@@ -153,6 +154,7 @@ export const translations: Record<Locale, Record<TranslationKey, TranslationValu
     "nav.searchPlaceholder": "搜尋資訊或可檢索文本...",
     "nav.metadataSearch": "資訊搜尋",
     "nav.fullTextSearch": "全文搜尋",
+    "nav.searchSyntaxHint": "支援：\"A\" AND \"B\"、\"A\" AND NOT \"B\"、\"A AND B\"；運算符只在引號外生效。",
     "nav.newEntry": "新增條目",
     "nav.deleteEntry": "刪除條目",
     "nav.results": "結果",
@@ -279,6 +281,7 @@ export const translations: Record<Locale, Record<TranslationKey, TranslationValu
     "nav.searchPlaceholder": "Search info or searchable text...",
     "nav.metadataSearch": "Info Search",
     "nav.fullTextSearch": "Full-Text Search",
+    "nav.searchSyntaxHint": "Supports: \"A\" AND \"B\", \"A\" AND NOT \"B\", \"A AND B\". Operators work only outside quotes.",
     "nav.newEntry": "New Entry",
     "nav.deleteEntry": "Delete Entry",
     "nav.results": "Results",
@@ -405,6 +408,7 @@ export const translations: Record<Locale, Record<TranslationKey, TranslationValu
     "nav.searchPlaceholder": "Informationen oder durchsuchbaren Text suchen...",
     "nav.metadataSearch": "Infosuche",
     "nav.fullTextSearch": "Volltextsuche",
+    "nav.searchSyntaxHint": "Unterstützt: \"A\" AND \"B\", \"A\" AND NOT \"B\", \"A AND B\". Operatoren gelten nur außerhalb von Anführungszeichen.",
     "nav.newEntry": "Neuer Eintrag",
     "nav.deleteEntry": "Eintrag löschen",
     "nav.results": "Ergebnisse",

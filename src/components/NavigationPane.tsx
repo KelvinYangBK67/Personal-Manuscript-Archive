@@ -414,6 +414,7 @@ export function NavigationPane(props: NavigationPaneProps) {
             <option value="metadata">{t("nav.metadataSearch")}</option>
             <option value="full_text">{t("nav.fullTextSearch")}</option>
           </select>
+          <p className="search-syntax-hint">{t("nav.searchSyntaxHint")}</p>
         </div>
         <div className="action-row compact-actions">
           <button className="primary-button compact-button" onClick={onOpenCreateDialog}>
@@ -456,7 +457,19 @@ export function NavigationPane(props: NavigationPaneProps) {
                   {result.result_type === "page" ? t("nav.pageResult") : t("nav.entryResult")} -{" "}
                   {t(matchedFieldKey(result.matched_field))}
                 </span>
-                <p>{result.snippet}</p>
+                <p>
+                  {result.snippet_parts?.length
+                    ? result.snippet_parts.map((part, index) =>
+                        part.highlighted ? (
+                          <mark key={`${result.entry_id}-${result.page_id ?? "entry"}-${index}`} className="search-highlight">
+                            {part.text}
+                          </mark>
+                        ) : (
+                          <span key={`${result.entry_id}-${result.page_id ?? "entry"}-${index}`}>{part.text}</span>
+                        ),
+                      )
+                    : result.snippet}
+                </p>
               </button>
             ))}
           </section>

@@ -69,6 +69,10 @@ export interface SearchResult {
   page_number: number | null;
   label: string;
   snippet: string;
+  snippet_parts: Array<{ text: string; highlighted: boolean }>;
+  highlight_terms: string[];
+  match_count: number;
+  query_summary: string | null;
   matched_field: string;
 }
 

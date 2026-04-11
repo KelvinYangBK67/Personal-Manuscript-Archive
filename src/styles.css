@@ -256,6 +256,13 @@ textarea {
   gap: 10px;
 }
 
+.search-syntax-hint {
+  margin: -2px 0 0;
+  color: #786b57;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 .search-result-card {
   width: 100%;
   text-align: left;
@@ -278,6 +285,13 @@ textarea {
   margin: 8px 0 0;
   color: #46392a;
   font-size: 14px;
+}
+
+.search-highlight {
+  border-radius: 5px;
+  padding: 0 2px;
+  background: rgba(210, 176, 85, 0.36);
+  color: inherit;
 }
 
 .search-result-meta,
