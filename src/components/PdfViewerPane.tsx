@@ -16,6 +16,8 @@ interface PdfViewerPaneProps {
   currentPageIndex: number;
   pageCount: number;
   onPageIndexChange: (pageIndex: number) => void;
+  fallbackText: string | null;
+  fallbackLabel: string | null;
 }
 
 interface ScrollAnchor {
@@ -31,7 +33,7 @@ function clampZoom(percent: number) {
 
 export const PdfViewerPane = memo(function PdfViewerPane(props: PdfViewerPaneProps) {
   const { t } = useI18n();
-  const { sourceKey, pdfData, currentPageIndex, pageCount, onPageIndexChange } = props;
+  const { sourceKey, pdfData, currentPageIndex, pageCount, onPageIndexChange, fallbackText, fallbackLabel } = props;
   const [documentRef, setDocumentRef] = useState<PDFDocumentProxy | null>(null);
   const [loadState, setLoadState] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [loadError, setLoadError] = useState("");
@@ -183,6 +185,9 @@ export const PdfViewerPane = memo(function PdfViewerPane(props: PdfViewerPanePro
   ]);
 
   const loadingMessage = useMemo(() => {
+    if (!pdfData && fallbackText?.trim()) {
+      return "";
+    }
     if (loadState === "idle") {
       return t("viewer.loadPdfPrompt");
     }
@@ -194,6 +199,9 @@ export const PdfViewerPane = memo(function PdfViewerPane(props: PdfViewerPanePro
     }
     return "";
   }, [loadError, loadState, t]);
+
+  const hasFallbackText = Boolean(fallbackText?.trim());
+  const normalizedFallbackText = fallbackText?.trim() ?? "";
 
   useEffect(() => {
     let cancelled = false;
@@ -292,81 +300,91 @@ export const PdfViewerPane = memo(function PdfViewerPane(props: PdfViewerPanePro
   return (
     <section className="pane pane-viewer">
       <div className="pane-toolbar viewer-toolbar">
-        <div className="action-row viewer-toolbar-group">
-          <button
-            className="secondary-button compact-button"
-            onClick={() => onPageIndexChange(Math.max(currentPageIndex - 1, 0))}
-            disabled={!documentRef || currentPageIndex <= 0}
-          >
-            {t("viewer.previous")}
-          </button>
-          <button
-            className="secondary-button compact-button"
-            onClick={() => onPageIndexChange(Math.min(currentPageIndex + 1, Math.max(pageCount - 1, 0)))}
-            disabled={!documentRef || currentPageIndex >= Math.max(pageCount - 1, 0)}
-          >
-            {t("viewer.next")}
-          </button>
-          <label className="inline-control">
-            <span>{t("viewer.jump")}</span>
-            <input
-              type="number"
-              min={1}
-              max={Math.max(pageCount, 1)}
-              value={Math.min(currentPageIndex + 1, Math.max(pageCount, 1))}
-              onChange={(event) =>
-                onPageIndexChange(
-                  Math.min(
-                    Math.max(Number(event.target.value || "1") - 1, 0),
-                    Math.max(pageCount - 1, 0),
-                  ),
-                )
-              }
-            />
-          </label>
-        </div>
-        <div className="action-row viewer-toolbar-group">
-          <button
-            className={`secondary-button compact-button ${zoomMode === "fit-width" ? "is-active" : ""}`}
-            onClick={() => {
-              pendingScrollAnchorRef.current = null;
-              setZoomMode("fit-width");
-            }}
-          >
-            {t("viewer.fitWidth")}
-          </button>
-          <button
-            className={`secondary-button compact-button ${zoomMode === "fit-page" ? "is-active" : ""}`}
-            onClick={() => {
-              pendingScrollAnchorRef.current = null;
-              setZoomMode("fit-page");
-            }}
-          >
-            {t("viewer.fitPage")}
-          </button>
-          <label className="inline-control">
-            <span>{t("viewer.zoomLabel")}</span>
-            <input
-              type="number"
-              min={minimumManualZoom}
-              max={maximumManualZoom}
-              value={Math.round(zoomMode === "manual" ? manualZoomPercent : effectiveScale * 100)}
-              onChange={(event) => setManualZoom(Number(event.target.value || "100"))}
-            />
-          </label>
-          <span className="viewer-meta">
-            {documentRef
-              ? t("viewer.pageCounter", { current: currentPageIndex + 1, total: pageCount })
-              : loadingMessage}
-          </span>
-          <span className="viewer-meta viewer-help">{t("viewer.zoomHelp")}</span>
-        </div>
+        {documentRef ? (
+          <>
+            <div className="action-row viewer-toolbar-group">
+              <button
+                className="secondary-button compact-button"
+                onClick={() => onPageIndexChange(Math.max(currentPageIndex - 1, 0))}
+                disabled={!documentRef || currentPageIndex <= 0}
+              >
+                {t("viewer.previous")}
+              </button>
+              <button
+                className="secondary-button compact-button"
+                onClick={() => onPageIndexChange(Math.min(currentPageIndex + 1, Math.max(pageCount - 1, 0)))}
+                disabled={!documentRef || currentPageIndex >= Math.max(pageCount - 1, 0)}
+              >
+                {t("viewer.next")}
+              </button>
+              <label className="inline-control">
+                <span>{t("viewer.jump")}</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={Math.max(pageCount, 1)}
+                  value={Math.min(currentPageIndex + 1, Math.max(pageCount, 1))}
+                  onChange={(event) =>
+                    onPageIndexChange(
+                      Math.min(
+                        Math.max(Number(event.target.value || "1") - 1, 0),
+                        Math.max(pageCount - 1, 0),
+                      ),
+                    )
+                  }
+                />
+              </label>
+            </div>
+            <div className="action-row viewer-toolbar-group">
+              <button
+                className={`secondary-button compact-button ${zoomMode === "fit-width" ? "is-active" : ""}`}
+                onClick={() => {
+                  pendingScrollAnchorRef.current = null;
+                  setZoomMode("fit-width");
+                }}
+              >
+                {t("viewer.fitWidth")}
+              </button>
+              <button
+                className={`secondary-button compact-button ${zoomMode === "fit-page" ? "is-active" : ""}`}
+                onClick={() => {
+                  pendingScrollAnchorRef.current = null;
+                  setZoomMode("fit-page");
+                }}
+              >
+                {t("viewer.fitPage")}
+              </button>
+              <label className="inline-control">
+                <span>{t("viewer.zoomLabel")}</span>
+                <input
+                  type="number"
+                  min={minimumManualZoom}
+                  max={maximumManualZoom}
+                  value={Math.round(zoomMode === "manual" ? manualZoomPercent : effectiveScale * 100)}
+                  onChange={(event) => setManualZoom(Number(event.target.value || "100"))}
+                />
+              </label>
+              <span className="viewer-meta">{t("viewer.pageCounter", { current: currentPageIndex + 1, total: pageCount })}</span>
+              <span className="viewer-meta viewer-help">{t("viewer.zoomHelp")}</span>
+            </div>
+          </>
+        ) : (
+          <div className="action-row viewer-toolbar-group viewer-text-toolbar">
+            <strong>{hasFallbackText ? t("viewer.readingText") : t("viewer.noPreview")}</strong>
+            {fallbackLabel ? <span className="viewer-meta">{fallbackLabel}</span> : null}
+            {hasFallbackText ? <span className="viewer-meta viewer-help">{t("viewer.readingTextHelp")}</span> : null}
+          </div>
+        )}
       </div>
       <div ref={viewerScrollRef} className="viewer-surface" onWheel={handleViewerWheel}>
         {documentRef ? (
           <div className="pdf-stage">
             <canvas ref={canvasRef} className="pdf-canvas" />
           </div>
+        ) : hasFallbackText ? (
+          <article className="text-preview-card">
+            <pre className="text-preview-content">{normalizedFallbackText}</pre>
+          </article>
         ) : (
           <p>{loadingMessage}</p>
         )}

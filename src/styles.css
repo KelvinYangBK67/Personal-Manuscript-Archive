@@ -153,6 +153,24 @@ button {
   background: white;
 }
 
+.text-preview-card {
+  max-width: 920px;
+  min-height: 100%;
+  padding: 24px 28px;
+  border-radius: 16px;
+  background: rgba(255, 252, 246, 0.96);
+  box-shadow: 0 16px 44px rgba(40, 32, 20, 0.12);
+}
+
+.text-preview-content {
+  margin: 0;
+  font: inherit;
+  line-height: 1.7;
+  color: #2b241b;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .primary-button,
 .secondary-button,
 .ghost-button,
@@ -624,6 +642,11 @@ label {
 
 .viewer-toolbar-group {
   gap: 6px;
+}
+
+.viewer-text-toolbar {
+  justify-content: space-between;
+  width: 100%;
 }
 
 .structured-date-grid {

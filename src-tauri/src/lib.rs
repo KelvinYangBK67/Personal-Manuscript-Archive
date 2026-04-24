@@ -1,7 +1,7 @@
 mod archive;
 
 use archive::{
-    copy_page, create_entry, delete_asset, delete_entry, import_asset, import_entry_pdf,
+    batch_import_files, copy_page, create_entry, delete_asset, delete_entry, import_asset, import_entry_pdf,
     init_archive_root, load_archive, load_binary_asset, move_page, remove_page, search_archive,
     update_entry, update_page,
 };
@@ -14,6 +14,7 @@ pub fn run() {
             init_archive_root,
             load_archive,
             load_binary_asset,
+            batch_import_files,
             import_asset,
             import_entry_pdf,
             delete_asset,

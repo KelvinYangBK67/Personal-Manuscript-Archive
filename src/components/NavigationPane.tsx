@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type DragEvent } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
 import type {
   EntryRecord,
   EntryWithPages,
@@ -25,7 +26,9 @@ interface NavigationPaneProps {
   onSelectEntry: (entryId: string) => void;
   onSelectPage: (page: PageRecord) => void;
   onToggleNode: (nodeId: string) => void;
+  onSetExpandedNodeIds: (nodeIds: string[]) => void;
   onOpenCreateDialog: () => void;
+  onBatchImportFiles: (sourcePaths: string[]) => Promise<void>;
   onDeleteEntry: () => Promise<void>;
   onRefresh: () => Promise<void>;
   onMovePage: (pageId: string, targetEntryId: string, targetBeforePageId: string | null) => Promise<void>;
@@ -34,6 +37,7 @@ interface NavigationPaneProps {
   onPasteIntoEntry: (entryId: string, targetBeforePageId: string | null) => Promise<void>;
   onRemovePage: (pageId: string) => Promise<void>;
   searching: boolean;
+  batchImporting: boolean;
 }
 
 interface TreePageNode {
@@ -124,7 +128,9 @@ export function NavigationPane(props: NavigationPaneProps) {
     onSelectEntry,
     onSelectPage,
     onToggleNode,
+    onSetExpandedNodeIds,
     onOpenCreateDialog,
+    onBatchImportFiles,
     onDeleteEntry,
     onRefresh,
     onMovePage,
@@ -133,6 +139,7 @@ export function NavigationPane(props: NavigationPaneProps) {
     onPasteIntoEntry,
     onRemovePage,
     searching,
+    batchImporting,
   } = props;
 
   const expandedSet = useMemo(() => new Set(expandedNodeIds), [expandedNodeIds]);
@@ -233,6 +240,23 @@ export function NavigationPane(props: NavigationPaneProps) {
       }));
   }, [entries]);
 
+  const allExpandableNodeIds = useMemo(() => {
+    const ids: string[] = [];
+    for (const typeNode of tree) {
+      ids.push(typeNode.id);
+      for (const yearNode of typeNode.years) {
+        ids.push(yearNode.id);
+        for (const monthNode of yearNode.months) {
+          ids.push(monthNode.id);
+        }
+      }
+      if (typeNode.unknownEntries.length > 0) {
+        ids.push(`${typeNode.id}:unknown`);
+      }
+    }
+    return ids;
+  }, [tree]);
+
   function matchedFieldKey(field: string): TranslationKey {
     const fieldMap: Record<string, TranslationKey> = {
       title: "result.matchedField.title",
@@ -265,6 +289,24 @@ export function NavigationPane(props: NavigationPaneProps) {
       return;
     }
     void onMovePage(pageId, targetEntryId, targetBeforePageId);
+  }
+
+  async function handleBatchImportClick() {
+    const selected = await open({
+      directory: false,
+      multiple: true,
+      title: t("button.batchImportFiles"),
+      filters: [
+        {
+          name: "Supported archive files",
+          extensions: ["pdf", "txt", "md", "docx", "tex"],
+        },
+      ],
+    });
+    const sourcePaths = Array.isArray(selected) ? selected : typeof selected === "string" ? [selected] : [];
+    if (sourcePaths.length > 0) {
+      await onBatchImportFiles(sourcePaths);
+    }
   }
 
   function renderContextMenu() {
@@ -420,8 +462,25 @@ export function NavigationPane(props: NavigationPaneProps) {
           <button className="primary-button compact-button" onClick={onOpenCreateDialog}>
             {t("nav.newEntry")}
           </button>
+          <button className="secondary-button compact-button" onClick={() => void handleBatchImportClick()} disabled={batchImporting}>
+            {batchImporting ? t("button.importing") : t("button.batchImportFiles")}
+          </button>
           <button className="secondary-button compact-button" onClick={() => void onRefresh()}>
             {t("common.refresh")}
+          </button>
+          <button
+            className="ghost-button compact-button"
+            onClick={() => onSetExpandedNodeIds(allExpandableNodeIds)}
+            disabled={showingResults || allExpandableNodeIds.length === 0}
+          >
+            {t("nav.expandAll")}
+          </button>
+          <button
+            className="ghost-button compact-button"
+            onClick={() => onSetExpandedNodeIds([])}
+            disabled={showingResults || expandedNodeIds.length === 0}
+          >
+            {t("nav.collapseAll")}
           </button>
           <button className="ghost-button compact-button" onClick={() => void onDeleteEntry()} disabled={!selectedEntryId}>
             {t("nav.deleteEntry")}

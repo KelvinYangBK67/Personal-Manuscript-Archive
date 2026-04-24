@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   ArchiveSnapshot,
+  BatchImportInput,
+  BatchImportResult,
   CreateEntryInput,
   CreateEntryResult,
   EntryRecord,
@@ -30,6 +32,10 @@ export async function createEntry(rootPath: string, input: CreateEntryInput): Pr
 
 export async function importEntryPdf(rootPath: string, input: ImportEntryPdfInput): Promise<ImportEntryPdfResult> {
   return invoke("import_entry_pdf", { rootPath, input });
+}
+
+export async function batchImportFiles(rootPath: string, input: BatchImportInput): Promise<BatchImportResult> {
+  return invoke("batch_import_files", { rootPath, input });
 }
 
 export async function updateEntry(rootPath: string, entry: EntryRecord): Promise<EntryRecord> {

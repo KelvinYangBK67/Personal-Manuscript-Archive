@@ -27,6 +27,8 @@ export type TranslationKey =
   | "nav.fullTextSearch"
   | "nav.searchSyntaxHint"
   | "nav.newEntry"
+  | "nav.expandAll"
+  | "nav.collapseAll"
   | "nav.deleteEntry"
   | "nav.results"
   | "nav.matches"
@@ -45,6 +47,9 @@ export type TranslationKey =
   | "viewer.pageCounter"
   | "viewer.zoomHelp"
   | "viewer.zoomLabel"
+  | "viewer.readingText"
+  | "viewer.readingTextHelp"
+  | "viewer.noPreview"
   | "editor.editor"
   | "editor.selectEntryOrPage"
   | "editor.inspector"
@@ -84,6 +89,7 @@ export type TranslationKey =
   | "button.importResource"
   | "button.deleteResource"
   | "button.importPdfPages"
+  | "button.batchImportFiles"
   | "button.importing"
   | "pageAction.cut"
   | "pageAction.copy"
@@ -103,6 +109,8 @@ export type TranslationKey =
   | "notice.extractionFailed"
   | "notice.extractionUnsupported"
   | "notice.invalidPdfPageRange"
+  | "notice.batchImportComplete"
+  | "notice.batchImportFailed"
   | "hint.searchableTextOnly"
   | "hint.resourcesRole"
   | "resources.empty"
@@ -156,6 +164,8 @@ export const translations: Record<Locale, Record<TranslationKey, TranslationValu
     "nav.fullTextSearch": "全文搜尋",
     "nav.searchSyntaxHint": "支援：\"A\" AND \"B\"、\"A\" AND NOT \"B\"、\"A AND B\"；運算符只在引號外生效。",
     "nav.newEntry": "新增條目",
+    "nav.expandAll": "展開全部",
+    "nav.collapseAll": "收起全部",
     "nav.deleteEntry": "刪除條目",
     "nav.results": "結果",
     "nav.matches": ({ count }) => `${count} 筆`,
@@ -174,6 +184,9 @@ export const translations: Record<Locale, Record<TranslationKey, TranslationValu
     "viewer.pageCounter": ({ current, total }) => `第 ${current} / ${total} 頁`,
     "viewer.zoomHelp": "可用 Ctrl + 滾輪縮放",
     "viewer.zoomLabel": "縮放",
+    "viewer.readingText": "轉寫閱讀",
+    "viewer.readingTextHelp": "此頁目前沒有 PDF，可在此閱讀該頁的可檢索文本。",
+    "viewer.noPreview": "沒有可顯示的閱讀內容",
     "editor.editor": "編輯器",
     "editor.selectEntryOrPage": "請選取條目或頁面，以編輯資訊與可檢索文本。",
     "editor.inspector": "檢視器",
@@ -213,6 +226,7 @@ export const translations: Record<Locale, Record<TranslationKey, TranslationValu
     "button.importResource": "匯入資源",
     "button.deleteResource": "刪除資源",
     "button.importPdfPages": "匯入 PDF 頁面",
+    "button.batchImportFiles": "批量匯入檔案",
     "button.importing": "處理中...",
     "pageAction.cut": "剪下頁面",
     "pageAction.copy": "複製頁面",
@@ -232,6 +246,8 @@ export const translations: Record<Locale, Record<TranslationKey, TranslationValu
     "notice.extractionFailed": "無法從該文件抽取純文本",
     "notice.extractionUnsupported": "此文件類型暫不支持自動抽取",
     "notice.invalidPdfPageRange": "PDF 頁碼範圍無效，留空即可匯入全部頁面。",
+    "notice.batchImportComplete": ({ imported, failed }) => `批量匯入完成：成功 ${imported}，失敗 ${failed}`,
+    "notice.batchImportFailed": "批量匯入失敗",
     "hint.searchableTextOnly":
       "這裡保存的是該頁唯一的可檢索文本，用於搜尋、索引與快速辨識內容，不用來重建原始格式。",
     "hint.resourcesRole": "附屬電子資源列於此處，可作為整理與比對材料，但不取代中欄主閱讀 PDF。",
@@ -283,6 +299,8 @@ export const translations: Record<Locale, Record<TranslationKey, TranslationValu
     "nav.fullTextSearch": "Full-Text Search",
     "nav.searchSyntaxHint": "Supports: \"A\" AND \"B\", \"A\" AND NOT \"B\", \"A AND B\". Operators work only outside quotes.",
     "nav.newEntry": "New Entry",
+    "nav.expandAll": "Expand All",
+    "nav.collapseAll": "Collapse All",
     "nav.deleteEntry": "Delete Entry",
     "nav.results": "Results",
     "nav.matches": ({ count }) => `${count} matches`,
@@ -301,6 +319,9 @@ export const translations: Record<Locale, Record<TranslationKey, TranslationValu
     "viewer.pageCounter": ({ current, total }) => `Page ${current} / ${total}`,
     "viewer.zoomHelp": "Use Ctrl + mouse wheel to zoom",
     "viewer.zoomLabel": "Zoom",
+    "viewer.readingText": "Transcription Reading",
+    "viewer.readingTextHelp": "This page has no PDF yet, so the searchable text is shown here for reading.",
+    "viewer.noPreview": "No reading content available",
     "editor.editor": "Editor",
     "editor.selectEntryOrPage": "Select an entry or page to edit archive info and searchable text.",
     "editor.inspector": "Inspector",
@@ -340,6 +361,7 @@ export const translations: Record<Locale, Record<TranslationKey, TranslationValu
     "button.importResource": "Import Resource",
     "button.deleteResource": "Delete Resource",
     "button.importPdfPages": "Import PDF Pages",
+    "button.batchImportFiles": "Batch Import Files",
     "button.importing": "Working...",
     "pageAction.cut": "Cut Page",
     "pageAction.copy": "Copy Page",
@@ -359,6 +381,8 @@ export const translations: Record<Locale, Record<TranslationKey, TranslationValu
     "notice.extractionFailed": "Unable to extract plain text from this file",
     "notice.extractionUnsupported": "Automatic extraction is not supported for this file type yet",
     "notice.invalidPdfPageRange": "Invalid PDF page range. Leave both fields blank to import all pages.",
+    "notice.batchImportComplete": ({ imported, failed }) => `Batch import complete: ${imported} imported, ${failed} failed`,
+    "notice.batchImportFailed": "Batch import failed",
     "hint.searchableTextOnly":
       "This field stores the page's single searchable text for search, indexing, and fast recognition, not for reconstructing original formatting.",
     "hint.resourcesRole": "Attached digital resources are listed here for reference and extraction work, but they do not replace the main reading PDF.",
@@ -410,6 +434,8 @@ export const translations: Record<Locale, Record<TranslationKey, TranslationValu
     "nav.fullTextSearch": "Volltextsuche",
     "nav.searchSyntaxHint": "Unterstützt: \"A\" AND \"B\", \"A\" AND NOT \"B\", \"A AND B\". Operatoren gelten nur außerhalb von Anführungszeichen.",
     "nav.newEntry": "Neuer Eintrag",
+    "nav.expandAll": "Alle ausklappen",
+    "nav.collapseAll": "Alle einklappen",
     "nav.deleteEntry": "Eintrag löschen",
     "nav.results": "Ergebnisse",
     "nav.matches": ({ count }) => `${count} Treffer`,
@@ -428,6 +454,9 @@ export const translations: Record<Locale, Record<TranslationKey, TranslationValu
     "viewer.pageCounter": ({ current, total }) => `Seite ${current} / ${total}`,
     "viewer.zoomHelp": "Mit Strg + Mausrad zoomen",
     "viewer.zoomLabel": "Zoom",
+    "viewer.readingText": "Transkriptansicht",
+    "viewer.readingTextHelp": "Für diese Seite liegt noch kein PDF vor; daher wird hier der durchsuchbare Text angezeigt.",
+    "viewer.noPreview": "Kein Lesematerial verfügbar",
     "editor.editor": "Editor",
     "editor.selectEntryOrPage": "Wähle einen Eintrag oder eine Seite aus, um Archivdaten und durchsuchbaren Text zu bearbeiten.",
     "editor.inspector": "Inspektor",
@@ -467,6 +496,7 @@ export const translations: Record<Locale, Record<TranslationKey, TranslationValu
     "button.importResource": "Ressource importieren",
     "button.deleteResource": "Ressource löschen",
     "button.importPdfPages": "PDF-Seiten importieren",
+    "button.batchImportFiles": "Dateien stapelweise importieren",
     "button.importing": "Wird verarbeitet...",
     "pageAction.cut": "Seite ausschneiden",
     "pageAction.copy": "Seite kopieren",
@@ -486,6 +516,9 @@ export const translations: Record<Locale, Record<TranslationKey, TranslationValu
     "notice.extractionFailed": "Aus dieser Datei konnte kein Klartext extrahiert werden",
     "notice.extractionUnsupported": "Für diesen Dateityp wird die automatische Extraktion derzeit nicht unterstützt",
     "notice.invalidPdfPageRange": "Ungültiger PDF-Seitenbereich. Leer lassen, um alle Seiten zu importieren.",
+    "notice.batchImportComplete": ({ imported, failed }) =>
+      `Stapelimport abgeschlossen: ${imported} importiert, ${failed} fehlgeschlagen`,
+    "notice.batchImportFailed": "Stapelimport fehlgeschlagen",
     "hint.searchableTextOnly":
       "Dieses Feld speichert den einzigen durchsuchbaren Text der Seite für Suche, Indexierung und schnelle Orientierung, nicht zur Rekonstruktion des ursprünglichen Layouts.",
     "hint.resourcesRole": "Angehängte digitale Ressourcen werden hier als Hilfsmaterial geführt, ersetzen aber nicht das zentrale Lese-PDF.",

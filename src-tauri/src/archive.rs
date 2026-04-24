@@ -115,6 +115,28 @@ pub struct ImportEntryPdfInput {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct BatchImportInput {
+    pub source_paths: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BatchImportItemResult {
+    pub source_path: String,
+    pub entry_id: Option<String>,
+    pub selected_page_id: Option<String>,
+    pub status: String,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BatchImportResult {
+    pub snapshot: ArchiveSnapshot,
+    pub imported_count: i64,
+    pub failed_count: i64,
+    pub results: Vec<BatchImportItemResult>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct CreateEntryResult {
     pub snapshot: ArchiveSnapshot,
     pub selected_entry_id: String,
@@ -1432,6 +1454,218 @@ fn detect_asset_type(path: &Path) -> String {
     }
 }
 
+fn default_batch_entry_title(source: &Path) -> String {
+    source
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("Untitled")
+        .to_string()
+}
+
+fn insert_batch_entry(transaction: &Transaction<'_>, entry_id: &str, title: &str, now: &str) -> ArchiveResult<()> {
+    transaction.execute(
+        "
+        INSERT INTO entries (
+          id, title, entry_type, date_year, date_month, date_day,
+          date_year_uncertain, date_month_uncertain, date_day_uncertain, date_note,
+          description, tags_json, page_count, notes, created_at, updated_at
+        ) VALUES (?1, ?2, NULL, NULL, NULL, NULL, 1, 1, 1, NULL, NULL, '[]', 0, NULL, ?3, ?4)
+        ",
+        params![entry_id, title, now, now],
+    )?;
+    Ok(())
+}
+
+fn import_batch_pdf(
+    root: &Path,
+    transaction: &Transaction<'_>,
+    source: &Path,
+    entry_id: &str,
+    now: &str,
+) -> ArchiveResult<Option<String>> {
+    let page_count = read_pdf_page_count(source)? as i64;
+    if page_count <= 0 {
+        return Err(ArchiveError::Message("PDF contains no pages.".into()));
+    }
+
+    let asset_id = next_id(transaction, "asset", "A")?;
+    let relative_pdf = relative_source_pdf_path(&asset_id);
+    let destination = absolute_asset_path(root, &relative_pdf);
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::copy(source, &destination)?;
+
+    let file_label = source
+        .file_name()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_string());
+    transaction.execute(
+        "
+        INSERT INTO assets (
+          id, entry_id, asset_type, file_path, label, notes, created_at, updated_at
+        ) VALUES (?1, ?2, 'pdf', ?3, ?4, NULL, ?5, ?6)
+        ",
+        params![asset_id.as_str(), entry_id, relative_pdf.as_str(), file_label, now, now],
+    )?;
+
+    let has_legacy_pdf_page_index = column_exists(transaction, "pages", "pdf_page_index")?;
+    let mut first_page_id = None;
+    for pdf_page_index in 0..page_count {
+        let page_id = next_id(transaction, "page", "P")?;
+        if first_page_id.is_none() {
+            first_page_id = Some(page_id.clone());
+        }
+        let sort_order = pdf_page_index + 1;
+        insert_page_row(
+            transaction,
+            has_legacy_pdf_page_index,
+            &NewPageRow {
+                id: page_id.as_str(),
+                entry_id,
+                page_number: sort_order,
+                sort_order,
+                source_asset_id: Some(asset_id.as_str()),
+                source_pdf_path: Some(relative_pdf.as_str()),
+                source_pdf_page_index: pdf_page_index,
+                original_page_number: Some(pdf_page_index + 1),
+                transcription_text: None,
+                summary: None,
+                keywords_json: Some("[]"),
+                page_notes: None,
+                created_at: now,
+                updated_at: now,
+            },
+        )?;
+    }
+
+    transaction.execute(
+        "
+        UPDATE entries
+        SET page_count = ?2, updated_at = ?3
+        WHERE id = ?1
+        ",
+        params![entry_id, page_count, now],
+    )?;
+
+    Ok(first_page_id)
+}
+
+fn import_batch_resource(
+    root: &Path,
+    transaction: &Transaction<'_>,
+    source: &Path,
+    entry_id: &str,
+    now: &str,
+) -> ArchiveResult<Option<String>> {
+    let extracted = extract_plain_text_from_path(source)?
+        .filter(|text| !text.trim().is_empty())
+        .ok_or_else(|| ArchiveError::Message("Unable to extract plain text from this file.".into()))?;
+
+    let asset_id = next_id(transaction, "asset", "A")?;
+    let extension = source
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase());
+    let relative_path = relative_resource_path(&asset_id, extension.as_deref());
+    let destination = absolute_asset_path(root, &relative_path);
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::copy(source, &destination)?;
+
+    let file_label = source
+        .file_name()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_string());
+    transaction.execute(
+        "
+        INSERT INTO assets (
+          id, entry_id, asset_type, file_path, label, notes, created_at, updated_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6, ?7)
+        ",
+        params![
+            asset_id.as_str(),
+            entry_id,
+            detect_asset_type(source),
+            relative_path.as_str(),
+            file_label,
+            now,
+            now
+        ],
+    )?;
+
+    let page_id = next_id(transaction, "page", "P")?;
+    let has_legacy_pdf_page_index = column_exists(transaction, "pages", "pdf_page_index")?;
+    insert_page_row(
+        transaction,
+        has_legacy_pdf_page_index,
+        &NewPageRow {
+            id: page_id.as_str(),
+            entry_id,
+            page_number: 1,
+            sort_order: 1,
+            source_asset_id: Some(asset_id.as_str()),
+            source_pdf_path: None,
+            source_pdf_page_index: 0,
+            original_page_number: None,
+            transcription_text: Some(extracted.trim()),
+            summary: None,
+            keywords_json: Some("[]"),
+            page_notes: None,
+            created_at: now,
+            updated_at: now,
+        },
+    )?;
+    transaction.execute(
+        "
+        UPDATE entries
+        SET page_count = 1, updated_at = ?2
+        WHERE id = ?1
+        ",
+        params![entry_id, now],
+    )?;
+
+    Ok(Some(page_id))
+}
+
+fn import_batch_source(root: &Path, connection: &mut Connection, source: &Path) -> ArchiveResult<(String, Option<String>)> {
+    if !source.exists() {
+        return Err(ArchiveError::Message("The selected file does not exist.".into()));
+    }
+    let extension = source
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase());
+
+    let transaction = connection.transaction()?;
+    let now = now_iso();
+    let entry_id = next_id(&transaction, "entry", "E")?;
+    insert_batch_entry(
+        &transaction,
+        entry_id.as_str(),
+        default_batch_entry_title(source).as_str(),
+        now.as_str(),
+    )?;
+
+    let selected_page_id = match extension.as_deref() {
+        Some("pdf") => import_batch_pdf(root, &transaction, source, entry_id.as_str(), now.as_str())?,
+        Some("txt") | Some("md") | Some("docx") | Some("tex") => {
+            import_batch_resource(root, &transaction, source, entry_id.as_str(), now.as_str())?
+        }
+        _ => {
+            return Err(ArchiveError::Message(
+                "Batch import currently supports PDF, TXT, Markdown, DOCX, and TeX files.".into(),
+            ));
+        }
+    };
+
+    transaction.commit()?;
+    Ok((entry_id, selected_page_id))
+}
+
 fn load_snapshot_internal(root: &Path) -> ArchiveResult<ArchiveSnapshot> {
     let connection = connection_for_root(root)?;
     let mut entry_statement = connection.prepare(
@@ -1883,6 +2117,53 @@ pub fn import_entry_pdf(root_path: String, input: ImportEntryPdfInput) -> Result
         snapshot,
         selected_entry_id: input.entry_id,
         selected_page_id: first_page_id,
+    })
+}
+
+#[tauri::command]
+pub fn batch_import_files(root_path: String, input: BatchImportInput) -> Result<BatchImportResult, String> {
+    let root = normalize_root(&root_path).map_err(to_tauri_error)?;
+    let mut connection = connection_for_root(&root).map_err(to_tauri_error)?;
+    let mut results = Vec::new();
+    let mut imported_count = 0;
+    let mut failed_count = 0;
+
+    for source_path in input.source_paths {
+        let trimmed = source_path.trim().to_string();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let source = PathBuf::from(trimmed.as_str());
+        match import_batch_source(&root, &mut connection, &source) {
+            Ok((entry_id, selected_page_id)) => {
+                imported_count += 1;
+                results.push(BatchImportItemResult {
+                    source_path: trimmed,
+                    entry_id: Some(entry_id),
+                    selected_page_id,
+                    status: "imported".into(),
+                    error: None,
+                });
+            }
+            Err(error) => {
+                failed_count += 1;
+                results.push(BatchImportItemResult {
+                    source_path: trimmed,
+                    entry_id: None,
+                    selected_page_id: None,
+                    status: "failed".into(),
+                    error: Some(error.to_string()),
+                });
+            }
+        }
+    }
+
+    let snapshot = load_snapshot_internal(&root).map_err(to_tauri_error)?;
+    Ok(BatchImportResult {
+        snapshot,
+        imported_count,
+        failed_count,
+        results,
     })
 }
 

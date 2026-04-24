@@ -109,6 +109,25 @@ export interface ImportEntryPdfResult {
   selected_page_id: string | null;
 }
 
+export interface BatchImportInput {
+  source_paths: string[];
+}
+
+export interface BatchImportItemResult {
+  source_path: string;
+  entry_id: string | null;
+  selected_page_id: string | null;
+  status: "imported" | "failed";
+  error: string | null;
+}
+
+export interface BatchImportResult {
+  snapshot: ArchiveSnapshot;
+  imported_count: number;
+  failed_count: number;
+  results: BatchImportItemResult[];
+}
+
 export interface ImportAssetInput {
   entry_id: string;
   source_path: string;

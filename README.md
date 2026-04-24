@@ -18,22 +18,35 @@ This project is released under the MIT License. See [LICENSE](LICENSE) for the f
 - Create the archive folder structure automatically.
 - Create empty entries first, without requiring a PDF.
 - Import PDF pages into an existing entry after the entry is created.
+- Batch import `pdf`, `txt`, `md`, `docx`, and `tex` files, creating entries from file names.
 - Treat pages as the main operational units inside entries.
 - Support page ordering, page movement, page copying, and page removal from entries.
 - Allow entries to contain pages sourced from more than one PDF.
 - Generate stable sequential IDs for entries, pages, and attached resources.
 - Use a three-pane desktop layout: catalog tree/search, PDF reader, and metadata/transcription/resources editor.
 - Browse entries in a five-level catalog tree: entry type, year, month, entry, page.
+- Expand all catalog groups down to entries while keeping page lists collapsed; only one entry page list can be expanded at a time.
 - Edit entry metadata and page metadata with autosave.
 - Edit page-level searchable text used for full-text search.
 - View PDFs inside the desktop app with page jump, fit-width, fit-page, direct zoom, and Ctrl + wheel zoom.
+- Show a text reading view in the middle pane for pages that have searchable text but no source PDF.
 - Import attached digital resources into the archive.
 - Import `txt`, `md`, `docx`, and `tex` resources with an optional plain-text extraction flow.
 - Choose whether extracted plain text should replace or append to the current page transcription.
 - Keep imported source files in the resource list while still using `transcription_text` as the single searchable text.
 - Delete entries and resources with soft-delete behavior by moving managed files into `trash/`.
-- Search metadata and searchable text from the left pane.
+- Search metadata and searchable text from the left pane with matched-field labels and highlighted snippets.
 - Switch the UI language between 繁體中文, English, and Deutsch.
+
+## Search Syntax
+
+The left pane has separate metadata and full-text search modes:
+
+- Metadata search checks entry title, entry type, description, tags, summary, keywords, and page notes.
+- Full-text search checks page `transcription_text`, plus page summary and page notes.
+- Search terms can be plain words or quoted phrases, such as `sanskrit` or `"socialist china"`.
+- Operators work outside quotes: `AND`, `OR`, `NOT`, `NAND`, `NOR`, and `XOR`.
+- Quoted text is literal, so `"A AND B"` searches for that phrase instead of treating `AND` as an operator.
 
 ## TeX Extraction
 
